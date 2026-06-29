@@ -38,6 +38,7 @@ wheels/
 *.json
 .env
 .env.local
+.env_local
 credentials/
 
 # Models & large artifacts

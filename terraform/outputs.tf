@@ -1,5 +1,10 @@
+output "tfstate_bucket_name" {
+  description = "Name of the Terraform state bucket"
+  value       = google_storage_bucket.tfstate_bucket.name
+}
+
 output "bucket_name" {
-  description = "Name of the GCS bucket"
+  description = "Name of the GCS bucket for data and artifacts"
   value       = google_storage_bucket.m5_bucket.name
 }
 

@@ -32,7 +32,7 @@ y advertencias sobre errores comunes — no código literal.
 - Trabajar siempre desde WSL2 en VSCode
 - Trabajar por Fases y por Tareas. 
     - Al completar cada Tarea preguntar si avanzar a la siguiente.
-    - Al terminar cada Fase generar un resumen y consultar si avanzar a la siguiente Fase
+    - Al terminar cada Fase generar un resumen y consultar si avanzar a la siguiente Fase, el resumen debe quedar en una carpeta con los resumenes por fase en formato md.
 - Todo artefacto generado (modelos, datos procesados) va en GCS, no local
 - Nunca commitear credenciales, data raw ni archivos de modelo grandes
 - El test set (últimos 28 días) está bloqueado hasta la evaluación final

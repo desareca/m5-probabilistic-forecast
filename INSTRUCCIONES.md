@@ -2,7 +2,7 @@
 
 ## Contexto del proyecto
 
-Proyecto de portfolio MLE en GCP. El objetivo es construir un pipeline end-to-end de forecasting probabilístico sobre el dataset M5 (Walmart), demostrando habilidades de ingeniería de features, modelado cuantil, MLOps en Vertex AI y visualización en Looker Studio.
+Proyecto de MLE en GCP. El objetivo es construir un pipeline end-to-end de forecasting probabilístico sobre el dataset M5 (Walmart), considerando ingeniería de features, modelado cuantil, MLOps en Vertex AI y visualización en Looker Studio.
 
 **Entorno de trabajo:**
 - OS: WSL2 (Ubuntu)
