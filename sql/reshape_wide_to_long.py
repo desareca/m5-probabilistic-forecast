@@ -15,7 +15,7 @@ PROJECT      = "mle-m5-forecast"
 DATASET      = "m5_dataset"
 SOURCE_TABLE = f"{PROJECT}.{DATASET}.sales_wide"
 DEST_TABLE   = f"{PROJECT}.{DATASET}.sales_long"
-N_DAYS       = 1941
+N_DAYS       = 1913
 START_DATE   = "2011-01-29"   # d_1 = 2011-01-29
 
 # ── Construcción del SQL ───────────────────────────────────────────────────────
