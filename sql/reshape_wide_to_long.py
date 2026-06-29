@@ -46,10 +46,7 @@ def build_union_sql(source: str, dest: str, n_days: int, start_date: str) -> str
         f"CLUSTER BY item_id, store_id\n"  # clustering → filtros por item/store mucho más rápidos
         f"OPTIONS (require_partition_filter = FALSE)\n"
         f"AS\n"
-        f"SELECT * FROM (\n\n"
-        f"{union_body}\n\n"
-        f")\n"
-        f"ORDER BY item_id, store_id, date;\n"
+        f"{union_body}\n"
     )
     return sql
 
