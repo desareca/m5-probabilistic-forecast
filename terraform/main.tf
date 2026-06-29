@@ -13,6 +13,23 @@ provider "google" {
   region  = var.region
 }
 
+# GCS Bucket for Terraform state
+resource "google_storage_bucket" "tfstate_bucket" {
+  name          = "${var.project_id}-tfstate"
+  location      = var.region
+  force_destroy = false
+
+  versioning {
+    enabled = true
+  }
+
+  labels = {
+    environment = "production"
+    project     = "m5-forecast"
+    purpose     = "terraform-state"
+  }
+}
+
 # GCS Bucket for raw data and artifacts
 resource "google_storage_bucket" "m5_bucket" {
   name          = "${var.project_id}-m5-bucket"
