@@ -37,6 +37,7 @@ wheels/
 # Credentials & secrets
 *.json
 .env
+.venv
 .env.local
 .env_local
 *.lock
