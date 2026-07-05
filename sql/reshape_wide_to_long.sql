@@ -7,8 +7,8 @@ CREATE OR REPLACE TABLE `mle-m5-forecast.m5_dataset.sales_long` AS
 WITH parsed_ids AS (
   SELECT
     id,
-    REGEXP_SUBSTR(id, r'^[^_]+') as item_id,
-    REGEXP_SUBSTR(id, r'[^_]+$') as store_id,
+    CONCAT(SPLIT(id, '_')[OFFSET(0)], '_', SPLIT(id, '_')[OFFSET(1)], '_', SPLIT(id, '_')[OFFSET(2)]) as item_id,
+    CONCAT(SPLIT(id, '_')[OFFSET(3)], '_', SPLIT(id, '_')[OFFSET(4)]) as store_id,
     t
   FROM `mle-m5-forecast.m5_dataset.sales_wide` t
 ),
