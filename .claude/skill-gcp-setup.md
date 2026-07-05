@@ -4,9 +4,8 @@ file: skill-gcp-setup.md
 description: >
   Principios y decisiones de diseño para configurar proyectos GCP orientados
   a ML/MLE. Usar cuando el usuario necesite: crear proyecto GCP, configurar
-  gcloud CLI, escribir Terraform para infraestructura base, autenticar
-  credenciales, estructurar un repositorio ML, o resolver errores de
-  permisos IAM y APIs no habilitadas.
+  autenticación, escribir Terraform para infraestructura base, estructurar
+  un repositorio ML, o resolver errores de permisos IAM y APIs no habilitadas.
 ---
 
 # GCP Setup — Patrones para proyectos ML
@@ -22,13 +21,33 @@ proyecto sea pequeño — demuestra buenas prácticas y permite reproducibilidad
 El estado de Terraform va en GCS, no local.
 
 **Credenciales siempre via Application Default Credentials (ADC).** Nunca
-hardcodear keys en código. `gcloud auth application-default login` es
-suficiente para desarrollo local. En Vertex AI, las credenciales se
-inyectan automáticamente.
+hardcodear keys en código. En Cloud Workstations, las credenciales ADC
+están preconfiguradas automáticamente — no se requiere `gcloud auth`
+manual en cada sesión. En Vertex AI, las credenciales se inyectan
+automáticamente via la service account del job.
 
 **Región única para todos los recursos.** Mantener GCS, BigQuery y Vertex AI
 en la misma región evita costos de egress entre servicios. Para este proyecto:
 `us-central1` por disponibilidad de GPUs y menor costo.
+
+**Apagar la Workstation al terminar cada sesión.** Cloud Workstations cobra
+por hora de uso. El hábito de apagarla al terminar es la acción más
+importante para controlar costos con los créditos de GCP.
+
+## Cloud Workstations
+
+El entorno de desarrollo corre directamente en GCP — sin WSL2, sin
+configuración local, sin problemas de PATH entre sistemas operativos.
+`gcloud`, `terraform`, Python y las librerías de GCP están disponibles
+en la Workstation sin instalación adicional.
+
+El flujo de trabajo estándar: encender Workstation desde la consola GCP →
+abrir VS Code en el navegador → clonar repo desde GitHub → trabajar →
+commitear → apagar Workstation.
+
+Si se necesita instalar dependencias adicionales, hacerlo con `pip install`
+dentro del entorno virtual del proyecto. No instalar paquetes globalmente
+en la Workstation.
 
 ## APIs a habilitar
 
@@ -65,6 +84,7 @@ Los errores más frecuentes en setup GCP son de tres tipos: API no habilitada
 (pasar `project=` explícito resuelve), y permisos IAM insuficientes (revisar
 roles en consola antes de depurar código).
 
-Si aparece un error inesperado de autenticación, el primer paso siempre es
-re-ejecutar `gcloud auth application-default login` y verificar que el
-proyecto activo sea el correcto con `gcloud config get-value project`.
+Si aparece un error inesperado de autenticación, verificar que el proyecto
+activo sea el correcto con `gcloud config get-value project`. En Cloud
+Workstations esto raramente falla — si ocurre, reiniciar la sesión de
+la Workstation suele resolverlo.

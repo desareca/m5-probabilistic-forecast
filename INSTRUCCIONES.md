@@ -5,9 +5,8 @@
 Proyecto de MLE en GCP. El objetivo es construir un pipeline end-to-end de forecasting probabilístico sobre el dataset M5 (Walmart), considerando ingeniería de features, modelado cuantil, MLOps en Vertex AI y visualización en Looker Studio.
 
 **Entorno de trabajo:**
-- OS: WSL2 (Ubuntu)
-- Editor: VSCode con Claude Code
-- Cloud: GCP (proyecto dedicado a portfolio)
+- Editor: Cloud Workstations (VS Code en navegador)
+- Cloud: GCP (proyecto `mle-m5-forecast`)
 - Python: 3.10+
 - Control de versiones: Git + GitHub
 
@@ -73,46 +72,34 @@ m5-probabilistic-forecast/
 
 ## Fases del proyecto
 
-### Fase 1 — Setup GCP
+### Fase 1 — Setup GCP ✅ COMPLETADA
 
 **Objetivo:** Infraestructura base lista para trabajar.
 
 **Tareas:**
-1. Crear proyecto GCP `mle-m5-forecast` en consola web
-2. Habilitar APIs:
-   - BigQuery API
-   - Vertex AI API
-   - Cloud Storage API
-   - Artifact Registry API
-3. Instalar y autenticar `gcloud` CLI en WSL2
-4. Inicializar repositorio Git con estructura de carpetas
-5. Escribir Terraform para crear:
-   - GCS bucket `mle-m5-bucket`
-   - Dataset BigQuery `m5_dataset`
+1. ✅ Crear proyecto GCP `mle-m5-forecast`
+2. ✅ Habilitar APIs (BigQuery, Vertex AI, Cloud Storage, Artifact Registry)
+3. ✅ Inicializar repositorio Git con estructura de carpetas
+4. ✅ Terraform: GCS bucket `mle-m5-forecast-m5-bucket` + dataset BigQuery `m5_dataset`
+5. ✅ Service account `mle-m5-sa` con roles IAM (BigQuery Admin, Storage Admin, AI Platform Admin)
 
-**Comandos de referencia:**
-```bash
-curl https://sdk.cloud.google.com | bash
-exec -l $SHELL
-gcloud init
-gcloud auth application-default login
-terraform init && terraform apply
-```
-
-**Entregable:** Proyecto GCP activo, bucket y dataset creados, repo Git inicializado.
+**Recursos creados:**
+- GCS Bucket: `mle-m5-forecast-m5-bucket` (us-central1)
+- BigQuery Dataset: `m5_dataset` (us-central1)
+- Service Account: `mle-m5-sa`
 
 ---
 
-### Fase 2 — Datos
+### Fase 2 — Datos (en progreso)
 
 **Objetivo:** Datos M5 cargados en BigQuery listos para exploración.
 
 **Tareas:**
-1. Instalar Kaggle API y descargar dataset M5 Uncertainty
-2. Subir CSVs crudos a GCS
-3. Cargar a BigQuery manteniendo formato original (wide)
-4. Hacer reshape wide → long en BigQuery SQL (~59M filas resultado)
-5. EDA en notebook:
+1. ✅ Descargar dataset M5 Uncertainty desde Kaggle
+2. ✅ Subir CSVs crudos a GCS
+3. ✅ Cargar a BigQuery en formato original (wide)
+4. ✅ Reshape wide → long en BigQuery SQL (~59M filas → tabla `m5_dataset.sales_long`)
+5. ⏳ EDA en notebook:
    - Distribución de ventas por categoría
    - Tasa de ceros por item/tienda
    - Variación de precio en el tiempo
@@ -123,7 +110,7 @@ terraform init && terraform apply
 - `sell_prices.csv` — ~6.8M filas
 - `calendar.csv` — 1,969 filas
 
-**Entregable:** Tabla `m5_dataset.sales_long` con ~59M filas, notebook EDA completo.
+**Entregable:** Notebook EDA completo (`notebooks/01_eda.ipynb`).
 
 ---
 
@@ -240,7 +227,6 @@ CV: walk-forward rolling window, folds de 28 días
 - Para LightGBM: regenerar features respetando el corte temporal de cada fold
 
 **Decisión pendiente al EDA:** tamaño de la ventana de train (candidatos: 365, 730 días).
-Evaluar qué tanto peso tiene la historia lejana en los patrones de venta antes de decidir.
 
 **Entregable:** Función `walk_forward_cv()` reutilizable con parámetro `window_size` configurable, métricas por fold para cada modelo.
 
@@ -375,18 +361,19 @@ m5_dataset.agg_weekly_comparison
 | Vertex AI Training (LightGBM, n1-standard-8, ~2hr) | ~$0.80 |
 | Vertex AI Batch Prediction (1 job) | ~$1–2 |
 | GCS storage | ~$0.10 |
+| Cloud Workstations (~$0.60/hr, uso activo) | Variable |
 | Looker Studio | Gratis |
-| **Total estimado** | **~$5–10 USD** |
+| **Total estimado** | **~$10–15 USD** |
 
-Con $300 de crédito inicial de GCP cuenta nueva: costo efectivo $0.
+Con $300 de crédito inicial de GCP: costo efectivo $0.
 
 ---
 
 ## Notas para Claude Code
 
-- Trabajar siempre en WSL2 desde VSCode
-- Usar `gcloud auth application-default login` para autenticación en scripts Python
+- Autenticación via Application Default Credentials (ADC) — ya configurada en la Workstation
 - Toda query BigQuery en Python usar `google-cloud-bigquery` con `project` explícito
 - Guardar artefactos intermedios en GCS, no local
 - Commitear frecuentemente con mensajes descriptivos
 - No commitear credenciales, data raw ni archivos de modelo grandes
+- **Apagar la Workstation cuando no se esté trabajando** para controlar costos
