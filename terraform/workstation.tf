@@ -71,6 +71,7 @@ resource "google_workstations_workstation_config" "m5_config" {
       boot_disk_size_gb            = 100
       disable_public_ip_addresses  = false
       service_account               = data.google_service_account.m5_sa.email
+      service_account_scopes        = ["https://www.googleapis.com/auth/cloud-platform"]
     }
   }
 
