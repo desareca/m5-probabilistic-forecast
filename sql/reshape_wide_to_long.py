@@ -41,14 +41,14 @@ def build_batch_sql(day_cols: list[str], day_offset_map: dict[str, int],
     selects = []
     for col, offset in day_offset_map.items():
         selects.append(
-            f"  SELECT\n"
-            f"    id,\n"
-            f"    REGEXP_SUBSTR(id, r'^[^_]+')  AS item_id,\n"
-            f"    REGEXP_SUBSTR(id, r'[^_]+$')  AS store_id,\n"
-            f"    DATE_ADD(DATE('{START_DATE}'), INTERVAL {offset} DAY) AS date,\n"
-            f"    CAST(`{col}` AS INT64) AS sales\n"
-            f"  FROM {SOURCE_TABLE}\n"
-            f"  WHERE `{col}` IS NOT NULL"
+        f"  SELECT\n"
+        f"    id,\n"
+        f"    CONCAT(SPLIT(id, '_')[OFFSET(0)], '_', SPLIT(id, '_')[OFFSET(1)], '_', SPLIT(id, '_')[OFFSET(2)]) AS item_id,\n"
+        f"    CONCAT(SPLIT(id, '_')[OFFSET(3)], '_', SPLIT(id, '_')[OFFSET(4)]) AS store_id,\n"
+        f"    DATE_ADD(DATE('{START_DATE}'), INTERVAL {offset} DAY) AS date,\n"
+        f"    CAST(`{col}` AS INT64) AS sales\n"
+        f"  FROM {SOURCE_TABLE}\n"
+        f"  WHERE `{col}` IS NOT NULL"
         )
 
     union_body = "\nUNION ALL\n".join(selects)
