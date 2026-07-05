@@ -78,6 +78,7 @@ resource "google_workstations_workstation_config" "m5_config" {
     mount_path = "/home"
     gce_pd {
       size_gb        = 100
+      disk_type      = "pd-balanced"
       fs_type        = "ext4"
       reclaim_policy = "RETAIN"
     }
