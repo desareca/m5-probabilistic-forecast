@@ -44,6 +44,7 @@ data "google_compute_subnetwork" "default" {
 
 # Cluster de Workstations
 resource "google_workstations_workstation_cluster" "m5_cluster" {
+  provider                = google-beta
   workstation_cluster_id = "m5-forecast-cluster"
   location                = var.region
   network                 = data.google_compute_network.default.id
@@ -59,6 +60,7 @@ resource "google_workstations_workstation_cluster" "m5_cluster" {
 
 # Configuración de la Workstation (define la "plantilla": máquina, disco, imagen)
 resource "google_workstations_workstation_config" "m5_config" {
+  provider                = google-beta
   workstation_config_id  = "m5-forecast-config"
   workstation_cluster_id = google_workstations_workstation_cluster.m5_cluster.workstation_cluster_id
   location                = var.region
@@ -93,6 +95,7 @@ resource "google_workstations_workstation_config" "m5_config" {
 
 # La Workstation en sí (la instancia que se enciende/apaga)
 resource "google_workstations_workstation" "m5_dev" {
+  provider                 = google-beta
   workstation_id          = "m5-dev-workstation"
   workstation_config_id   = google_workstations_workstation_config.m5_config.workstation_config_id
   workstation_cluster_id  = google_workstations_workstation_cluster.m5_cluster.workstation_cluster_id
