@@ -124,16 +124,6 @@ git remote -v  # ✓ origin → https://github.com/desareca/m5-probabilistic-for
 
 ---
 
-## Conocimientos Adquiridos
-
-- Configuración de `gcloud` CLI en WSL2 (problemas de certificados SSL, soluciones)
-- Instalación de herramientas (Terraform, gh) en WSL2 con `sudo`
-- Terraform para GCP: buckets, datasets, service accounts, IAM roles
-- GitHub CLI (`gh`) para crear repos desde CLI
-- Integración WSL2 ↔ Windows PATH
-
----
-
 ## Próxima Fase: FASE 2 — Datos
 
 **Objetivo:** Cargar dataset M5 a BigQuery, reshape wide→long, EDA.

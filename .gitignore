@@ -39,6 +39,7 @@ wheels/
 .env
 .env.local
 .env_local
+*.lock
 credentials/
 
 # Models & large artifacts
