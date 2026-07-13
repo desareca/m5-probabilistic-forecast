@@ -139,30 +139,68 @@ hasta la evaluación final — en vez de depender solo de disciplina de código 
 
 **Objetivo:** Tabla de features lista para entrenamiento, sin data leakage.
 
-**Regla crítica:** Toda feature debe respetar el corte temporal. Los lags y rolling features deben calcularse con `ORDER BY date` y nunca mirar hacia el futuro del punto de predicción.
+**Regla crítica:** Toda feature debe respetar el corte temporal. Los lags y rolling features deben calcularse con `ORDER BY date` y `ROWS BETWEEN N PRECEDING AND 1 PRECEDING` — nunca `CURRENT ROW`.
+
+**Consumidor de esta tabla:** únicamente LightGBM Quantile (Fase 4c). ARIMA clásico y BQML
+ARIMA_PLUS trabajan directo sobre `sales_long` (serie univariada), no consumen
+`features_train`. Por eso dejar NULLs en columnas de lag/rolling al inicio de cada serie no
+representa un problema — LightGBM los maneja nativamente y no hay un segundo consumidor que
+requiera imputación.
+
+**Grain:** una fila por `(item_id, store_id, date)`, igual que `sales_long`. Todas las window
+functions particionadas por `item_id, store_id`, ordenadas por `date`.
 
 **Features a construir en BigQuery SQL:**
 
 ```
 Temporales:
-- lag_7, lag_14, lag_28 (ventas de hace N días)
+- lag_7, lag_14, lag_28, lag_182 (ventas de hace N días)
 - roll_mean_7, roll_mean_28 (promedio móvil)
 - roll_std_28 (volatilidad)
-- día de semana, mes, año, semana del año
+- día de semana, día del mes, mes, año, semana del año
+- days_since_start (día 1, 2, 3... desde 2011-01-29 — proxy de tendencia continua,
+  más fino que "año" categórico; justificado por la tendencia +57% vista en el EDA)
+- days_since_last_sale (días desde la última venta > 0)
+- pct_zeros_28d (% de ceros en los últimos 28 días)
+  → days_since_last_sale y pct_zeros_28d están justificados por el hallazgo del EDA de que
+  78.4% de las series tienen ≥50% de días en cero; roll_mean/std no distingue patrones de
+  intermitencia distintos con la misma media
 
 Fourier (estacionalidad):
 - sin/cos para period=7 (semanal), n_terms=3
-- sin/cos para period=365 (anual), n_terms=5
+- sin/cos para period=182.625 (semestral), n_terms=3
+- sin/cos para period=365.25 (anual), n_terms=5
+  → NO se agrega Fourier mensual: para LightGBM (árboles, splits arbitrarios) es redundante
+  con day_of_month, que ya captura el mismo patrón sin necesitar representación suavizada.
+  Fourier semestral sí se agrega porque complementa a lag_182 con la posición cíclica dentro
+  del semestre, en vez de duplicar solo el valor puntual histórico
 
 Precio:
-- precio actual
-- precio relativo a media histórica del item
-- momentum de precio (variación últimas 4 semanas)
+- precio actual (sell_price, join por item_id + store_id + wm_yr_wk)
+- price_rel_mean: precio actual / media móvil de 365 días del item (NO expandida — una media
+  de todo el historial arrastraría el sesgo de precios de 2011, igual que discutimos para
+  window_size; consistente con la ventana de 365 días fijada en Fase 5)
+- price_momentum_4w (variación % vs precio de hace 4 semanas)
+- lag_price_28 (precio de hace 28 días — no lag_price_7 porque sell_price cambia a nivel
+  semanal wm_yr_wk, un lag de 7 días repetiría casi siempre el mismo valor)
+- price_changed (flag binario: ¿cambió el precio respecto al día anterior? — más informativo
+  que un lag continuo para detectar promociones puntuales)
 
 Eventos:
-- flag de evento (binario)
-- tipo de evento (cultural, sporting, nacional, religiosa)
-- días antes/después del evento
+- is_event (flag binario, cualquier evento en event_type_1 o event_type_2)
+- event_type (categórico: Cultural, National, Religious, Sporting)
+- days_to_next_event, days_from_last_event
+- is_christmas (flag binario explícito, 25-dic — Walmart cierra ese día todos los años,
+  confirmado en el EDA: la serie agregada cae a cero)
+- event_type recodificado: Navidad usa tipo propio 'Store_Closure' en vez de mezclarse con
+  los 4 tipos genéricos (flag + tipo propio a la vez, redundancia intencional de costo cero)
+- snap_active: SNAP no viene a nivel tienda en `calendar` (viene por estado: snap_CA/TX/WI).
+  Derivar el estado desde el prefijo de store_id y seleccionar la columna correspondiente:
+    CASE
+      WHEN store_id LIKE 'CA%' THEN snap_CA
+      WHEN store_id LIKE 'TX%' THEN snap_TX
+      WHEN store_id LIKE 'WI%' THEN snap_WI
+    END AS snap_active
 ```
 
 **Entregable:** Tabla `m5_dataset.features_train` con todas las features, documentación de cada feature y su justificación.
