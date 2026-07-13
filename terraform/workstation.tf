@@ -12,8 +12,17 @@
 #     acordado — no depender de este timeout como hábito.
 #   - Running timeout: límite duro de 12h por sesión activa, como segunda
 #     red de seguridad ante GCP olvidos o sesiones colgadas.
-#   - Disco persistente: 100GB, retenido entre reinicios de la Workstation
-#     (RETAIN) para no perder el estado del repo/entorno entre sesiones.
+#   - Disco persistente: 100GB, reclaim_policy = DELETE (actualizado
+#     2026-07-13). Decisión: dado uso esporádico, el cluster completo se
+#     arma y se destruye entre sesiones (ver scripts/start-session.sh y
+#     scripts/stop-session.sh) en vez de dejarlo corriendo — el cargo de
+#     cluster ($0.20/h) corre 24/7 mientras el cluster exista, sin importar
+#     si la workstation está encendida o apagada. Con RETAIN el disco
+#     quedaba huérfano al destruir el cluster (no se puede re-adjuntar a
+#     un cluster nuevo) y seguía cobrando aparte. Con DELETE, destruir el
+#     cluster limpia todo sin dejar recursos sueltos. El costo es perder
+#     el estado de /home entre sesiones — aceptable porque el repo vive en
+#     GitHub y los artefactos van a GCS, no local.
 
 # APIs necesarias para Cloud Workstations
 resource "google_project_service" "workstations_api" {
@@ -81,7 +90,7 @@ resource "google_workstations_workstation_config" "m5_config" {
       size_gb        = 100
       disk_type      = "pd-balanced"
       fs_type        = "ext4"
-      reclaim_policy = "RETAIN"
+      reclaim_policy = "DELETE"
     }
   }
 
