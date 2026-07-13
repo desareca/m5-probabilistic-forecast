@@ -106,9 +106,17 @@ m5-probabilistic-forecast/
    - Distribución de eventos del calendario
 
 **Archivos fuente M5:**
-- `sales_train_validation.csv` — 30,490 filas × 1,919 columnas
+- `sales_train_validation.csv` — 30,490 filas × 1,919 columnas (día `d_1`–`d_1913`, hasta 2016-04-24)
 - `sell_prices.csv` — ~6.8M filas
 - `calendar.csv` — 1,969 filas
+
+**⚠️ Decisión de diseño — qué archivo de ventas cargar:**
+Se carga **únicamente `sales_train_validation.csv`** (1,913 días) a `sales_wide`/`sales_long`
+durante las Fases 2–6. `sales_train_evaluation.csv` (1,941 días, hasta 2016-06-19) ya está
+disponible en GCS (`raw/sales_train_evaluation.csv`) pero **no se carga a BigQuery hasta la
+Fase 6**, y solo para extraer los últimos 28 días (`d_1914`–`d_1941`) como ground truth del
+TEST set. Esto garantiza que el TEST set esté bloqueado físicamente — no existe en BigQuery
+hasta la evaluación final — en vez de depender solo de disciplina de código para no tocarlo.
 
 **Entregable:** Notebook EDA completo (`notebooks/01_eda.ipynb`).
 
@@ -209,15 +217,22 @@ params = {
 
 **Esquema temporal:**
 ```
-Total: ~1,941 días (2011-01-29 → 2016-06-19)
+Total: 1,941 días (2011-01-29 → 2016-06-19)
 
 [========== TRAIN + CV ==========][== VAL ==][== TEST ==]
         ~1,885 días                  28 días    28 días
+[----------- sales_train_validation.csv (1,913 días) -----------][+28 evaluation]
 
-TEST: bloqueado hasta evaluación final (nunca tocar antes)
-VAL: para selección de hiperparámetros y modelo
-CV: walk-forward rolling window, folds de 28 días
+TEST: bloqueado hasta evaluación final (nunca tocar antes) — vive solo en
+      sales_train_evaluation.csv, que no se carga a BigQuery hasta Fase 6
+VAL: para selección de hiperparámetros y modelo — últimos 28 días de
+     sales_train_validation.csv, sí disponible en BigQuery desde Fase 2
+CV: walk-forward rolling window, folds de 28 días, dentro de TRAIN+CV
 ```
+
+Nota: los 1,913 días de `sales_train_validation.csv` (que sí está cargado en BigQuery)
+cubren exactamente TRAIN + CV + VAL. Los 28 días de TEST son la diferencia con
+`sales_train_evaluation.csv` (1,941 días) y permanecen fuera de BigQuery hasta la Fase 6.
 
 **Walk-forward CV:**
 - Rolling window (el train tiene tamaño fijo, se desplaza hacia adelante)
@@ -235,6 +250,12 @@ CV: walk-forward rolling window, folds de 28 días
 ### Fase 6 — Evaluación
 
 **Objetivo:** Comparativa honesta entre los 3 modelos.
+
+**Paso previo — habilitar el TEST set:** cargar `sales_train_evaluation.csv` (ya está en
+`raw/` en GCS) a una tabla nueva `m5_dataset.sales_wide_evaluation`, hacer reshape a long,
+y quedarse **solo** con `d_1914`–`d_1941` (2016-04-25 → 2016-06-19) como
+`m5_dataset.test_labels`. No usar el resto de las columnas de este archivo para nada más —
+son idénticas a `sales_train_validation.csv` en `d_1`–`d_1913`.
 
 **Métrica principal:** Weighted Scaled Pinball Loss (métrica oficial M5 Uncertainty)
 
