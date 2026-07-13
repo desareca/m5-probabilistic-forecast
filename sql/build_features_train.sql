@@ -310,5 +310,4 @@ price AS (
 )
 
 SELECT *
-FROM price
-ORDER BY item_id, store_id, date;
+FROM price;
