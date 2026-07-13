@@ -90,9 +90,9 @@ SELECT
   ABS(mc.manual_roll_mean_28 - ft.roll_mean_28) < 1e-9 AS roll_mean_28_matches
 FROM manual_calc mc
 JOIN `mle-m5-forecast.m5_dataset.features_train` ft
-  ON ft.store_id = 'CA_1'
- AND ft.item_id = (SELECT item_id FROM sample_item)
- AND ft.date = mc.check_date
+  ON ft.date = mc.check_date
+WHERE ft.store_id = 'CA_1'
+  AND ft.item_id = (SELECT item_id FROM sample_item)
 ORDER BY mc.check_date;
 
 
