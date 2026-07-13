@@ -90,7 +90,7 @@ m5-probabilistic-forecast/
 
 ---
 
-### Fase 2 — Datos (en progreso)
+### Fase 2 — Datos ✅ COMPLETADA
 
 **Objetivo:** Datos M5 cargados en BigQuery listos para exploración.
 
@@ -98,12 +98,25 @@ m5-probabilistic-forecast/
 1. ✅ Descargar dataset M5 Uncertainty desde Kaggle
 2. ✅ Subir CSVs crudos a GCS
 3. ✅ Cargar a BigQuery en formato original (wide)
-4. ✅ Reshape wide → long en BigQuery SQL (~59M filas → tabla `m5_dataset.sales_long`)
-5. ⏳ EDA en notebook:
+4. ✅ Reshape wide → long en BigQuery SQL (58,327,370 filas → tabla `m5_dataset.sales_long`)
+5. ✅ EDA en notebook (`notebooks/01_eda.ipynb`):
    - Distribución de ventas por categoría
    - Tasa de ceros por item/tienda
    - Variación de precio en el tiempo
    - Distribución de eventos del calendario
+   - Patrones estacionales (semanal, mensual, anual)
+   - Autocorrelación (ACF) para decidir `window_size`
+
+**Hallazgos clave del EDA (ver notebook para detalle completo):**
+- 78.4% de las series tienen ≥50% de días en cero — confirma LightGBM Quantile sobre ARIMA puro
+- Coeficiente de variación de precios real: 62–91% según categoría
+- Estacionalidad semanal clara (sáb/dom por encima de entre-semana) → justifica Fourier `period=7`
+- Tendencia anual ascendente marcada: +57% entre 2011 y 2016 (parcial)
+- **Walmart cierra cada 25 de diciembre** — la serie agregada cae a cero ese día todos los años.
+  Debe tratarse como caso especial determinístico en la feature de eventos de Fase 3, no como
+  un evento más
+- ACF (serie detrended): meseta 0.42–0.44 entre lag=365 y lag=546 (eco anual real), pero colapsa
+  a ~0 en lag=730 — evidencia directa para fijar `window_size = 365` (ver Fase 5)
 
 **Archivos fuente M5:**
 - `sales_train_validation.csv` — 30,490 filas × 1,919 columnas (día `d_1`–`d_1913`, hasta 2016-04-24)
@@ -241,7 +254,11 @@ cubren exactamente TRAIN + CV + VAL. Los 28 días de TEST son la diferencia con
 - Aplicar a los 3 modelos con la misma lógica y mismo tamaño de ventana
 - Para LightGBM: regenerar features respetando el corte temporal de cada fold
 
-**Decisión pendiente al EDA:** tamaño de la ventana de train (candidatos: 365, 730 días).
+**Decisión tomada (post-EDA): `window_size = 365` días.** Justificación: la ACF de la serie
+agregada (detrended) muestra una meseta de 0.42–0.44 entre lag=365 y lag=546 (eco anual real,
+sobrevive al detrend), pero colapsa a ~0 en lag=730. Una ventana de 730 días diluiría la señal
+reciente con historia sin correlación real, además de arrastrar el nivel de ventas más bajo de
+años tempranos (tendencia +57% entre 2011 y 2016). Ver `notebooks/01_eda.ipynb`, sección 9.
 
 **Entregable:** Función `walk_forward_cv()` reutilizable con parámetro `window_size` configurable, métricas por fold para cada modelo.
 
