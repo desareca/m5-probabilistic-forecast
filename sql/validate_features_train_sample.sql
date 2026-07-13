@@ -104,6 +104,15 @@ ORDER BY mc.check_date;
 -- fechas lo expondrian inmediatamente (en una fecha donde snap_CA=1 y
 -- snap_TX=0, snap_active deberia ser 1, no 0).
 --
+-- DISTINCT sobre (date, store_id, snap_active): snap_active es el mismo
+-- valor para los 30,490 items de una tienda en una fecha dada -- no depende
+-- del item. Sin DISTINCT, el JOIN devuelve una fila por item (~300,000 filas
+-- para 10 fechas), lo que satura la consola/output sin aportar informacion
+-- nueva. Con DISTINCT: 10 filas, mismo resultado de validacion. (Nota: el
+-- costo en bytes escaneados de BigQuery no cambia -- se cobra por datos
+-- leidos de las tablas fuente, no por filas de salida -- pero el resultado
+-- es muchisimo mas manejable de revisar.)
+--
 -- Resultado esperado: matches_snap_CA = TRUE en todas las filas.
 -- ============================================================================
 
@@ -115,7 +124,7 @@ WITH contrast_dates AS (
   LIMIT 10
 )
 
-SELECT
+SELECT DISTINCT
   ft.date,
   ft.store_id,
   ft.snap_active,
