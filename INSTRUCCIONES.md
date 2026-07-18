@@ -263,10 +263,34 @@ OPTIONS(
 
 #### 4c. LightGBM Cuantil
 
-- Un modelo por percentil: P5, P25, P50, P75, P95
-- `objective='quantile'`, `alpha=q`
-- Entrenado en Vertex AI Custom Training Job (n1-standard-8)
-- Artefactos guardados en GCS
+**Alcance del smoke test (Fase 4):** un solo fold, el más reciente — reutiliza directo el
+`window_size=365` ya decidido, y es literalmente el primer fold que va a correr Fase 5:
+```
+TRAIN: 365 días inmediatamente antes de VAL
+VAL:   últimos 28 días del rango de sales_long (esquema temporal de Fase 5)
+```
+Escala: 30,490 series × 365 días ≈ 11.1M filas de train, ~853K filas de VAL a predecir.
+
+**Target:** `sales` (incluido en `features_train`).
+
+**Features excluidas deliberadamente:** `item_id` y `store_id` — el modelo debe generalizar
+desde las señales derivadas (lags, precio, eventos, tendencia), no memorizar qué serie es
+cuál. Incluir `store_id` le daría al modelo un atajo poco realista para un problema que en la
+práctica debería generalizar ante cambios en la red de tiendas.
+
+**Categóricas** (cast a `category` dtype de pandas antes de entrenar):
+`day_of_week`, `day_of_month`, `month`, `week_of_year`, `event_type`, `is_event`,
+`is_christmas`, `snap_active`, `price_changed`.
+
+**Sin early stopping en Fase 4** — `n_estimators` fijo para que el smoke test sea simple y
+determinístico; Fase 5 puede agregar early stopping después si hace falta ajuste fino.
+
+**NULLs:** sin imputación, LightGBM los maneja nativamente (ver Fase 3).
+
+**Quantile crossing:** ordenar los 5 valores predichos por fila antes de guardar
+(`np.sort` sobre las 5 columnas) — garantiza monotonicidad P5 ≤ P25 ≤ P50 ≤ P75 ≤ P95.
+
+**Un modelo por percentil**: P5, P25, P50, P75, P95
 
 ```python
 params = {
@@ -277,6 +301,12 @@ params = {
     'num_leaves': 127,
 }
 ```
+
+- Entrenado en Vertex AI Custom Training Job (n1-standard-8)
+- Artefactos: 5 archivos `.txt` (`booster.save_model()`), uno por cuantil, guardados en GCS
+- Predicciones guardadas en `m5_dataset.predictions_lgbm`
+  `(item_id, store_id, date, p05, p25, p50, p75, p95)` — mismo esquema que 4a/4b para que
+  las Tablas A/B de Fase 6 puedan compararlos directo
 
 **Entregable:** 3 modelos entrenados, predicciones guardadas en BigQuery.
 
