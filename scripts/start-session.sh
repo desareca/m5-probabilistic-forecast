@@ -54,6 +54,7 @@ cat <<'EOF'
 │ CHECKLIST post-arranque (el disco es nuevo, /home está vacío) │
 ├─────────────────────────────────────────────────────────────┤
 │ [ ] git clone https://github.com/desareca/m5-probabilistic-forecast.git │
+| [ ] sudo apt update                                           │
 │ [ ] sudo apt install -y python3.12-venv                       │
 │ [ ] python3.12 -m venv venv && source venv/bin/activate       │
 │ [ ] pip install -r requirements.txt                            │
