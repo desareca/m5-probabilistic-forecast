@@ -213,10 +213,26 @@ Eventos:
 
 #### 4a. ARIMA clásico (statsmodels)
 
-- Trabajar con submuestra: 1 tienda (CA_1), categoría FOODS
-- Entrenar un ARIMA por serie temporal
-- Guardar predicciones puntuales e intervalos de confianza
-- Documentar limitaciones: no escala, intervalos asumen normalidad
+- Trabajar con una **muestra estratificada de 32 series** (8 por cada categoría de
+  `categoria_zero_rate`: rapido/medio/lento/muy_lento), tomada de `m5_dataset.series_segments`,
+  a través de las 10 tiendas y 3 categorías de producto — no proporcional a la distribución
+  real (que es 78% lento+muy_lento), sino pareja entre regímenes para poder comparar el
+  comportamiento de ARIMA en cada uno con la misma cantidad de evidencia
+- **No busca escalar a las 30,490 series** — BQML ARIMA_PLUS (4b) ya cubre "ARIMA a escala"
+  vía `TIME_SERIES_ID_COL`, con un pipeline más completo (STL, holiday effects, manejo de
+  spikes). El propósito de 4a es mostrar el mecanismo de ARIMA "desnudo" — elegir (p,d,q),
+  interpretar AIC, exponer por qué falla en series intermitentes — no competir en escala
+- `auto_arima` (pmdarima) por serie individual, no un orden fijo por categoría — más correcto
+  estadísticamente; los resultados se agrupan después por `categoria_zero_rate` para el análisis
+- Si `auto_arima` no converge o produce varianza ~0 (común en series `muy_lento`), la serie se
+  marca como fallo con la razón — no hay fallback silencioso a naive; el fallo en sí es un
+  hallazgo del experimento
+- Cuantiles derivados del forecast + error estándar asumiendo normalidad (`scipy.stats.norm`),
+  igual criterio que 4b para que la comparación en Fase 6 sea consistente entre modelos.
+  Aplicar `clip(0, None)` — los cuantiles bajos pueden salir negativos en series intermitentes
+- Guardar tabla de metadata por serie: `(p,d,q)` elegido, AIC, convergió (bool), razón de fallo
+- Documentar limitaciones: no escala, intervalos asumen normalidad, no captura estacionalidad
+  (`seasonal=False`)
 
 ```python
 from statsmodels.tsa.arima.model import ARIMA
@@ -228,6 +244,9 @@ from statsmodels.tsa.arima.model import ARIMA
 - Mismo concepto escalado a las 30,490 series completas
 - Entrenado 100% en BigQuery SQL
 - Usar `holiday_region = 'US'`
+- `auto_arima_max_order = 4` (default es 5) — reduce el multiplicador de costo de 42x a 30x
+  (~$22 → ~$15.94 estimado, ver tabla de Costos). Casi la búsqueda completa del default,
+  con ahorro moderado de costo/tiempo
 - Extraer predicciones con `ML.FORECAST`
 
 ```sql
@@ -237,7 +256,8 @@ OPTIONS(
   time_series_timestamp_col = 'date',
   time_series_data_col = 'sales',
   time_series_id_col = ['item_id', 'store_id'],
-  holiday_region = 'US'
+  holiday_region = 'US',
+  auto_arima_max_order = 4
 ) AS ...
 ```
 
@@ -291,6 +311,13 @@ cubren exactamente TRAIN + CV + VAL. Los 28 días de TEST son la diferencia con
 - Horizonte de predicción: 28 días por fold
 - Aplicar a los 3 modelos con la misma lógica y mismo tamaño de ventana
 - Para LightGBM: regenerar features respetando el corte temporal de cada fold
+- **Consistencia de alcance entre modelos:** los folds (mismos cortes de fecha, mismo
+  `window_size`) se generan una sola vez y se aplican consistentemente, pero no todos los
+  modelos corren sobre las mismas series: LightGBM y BQML ARIMA_PLUS corren cada fold sobre
+  las 30,490 series completas; ARIMA clásico corre los mismos folds pero solo sobre la
+  muestra estratificada de 32 series (Fase 4a). Esto es necesario para que la Tabla A de
+  Fase 6 (comparación de 32 series, 3 modelos) sea válida — mismos folds, mismas series,
+  entre los tres.
 
 **Decisión tomada (post-EDA): `window_size = 365` días.** Justificación: la ACF de la serie
 agregada (detrended) muestra una meseta de 0.42–0.44 entre lag=365 y lag=546 (eco anual real,
@@ -321,15 +348,29 @@ def pinball_loss(y_true, y_pred, quantile):
 ```
 
 **Análisis requerido:**
+
+**Tabla A — Comparación de sofisticación de modelo (32 series, los 3 modelos):**
+ARIMA clásico vs BQML ARIMA_PLUS vs LightGBM, evaluados **exactamente sobre la muestra
+estratificada de 32 series de Fase 4a y los mismos folds del walk-forward**. No requiere
+re-entrenar BQML/LightGBM — se filtran sus predicciones (ya calculadas sobre las 30,490
+series completas) por `item_id+store_id IN (muestra_32)`. Responde: "¿cuánto mejora cada
+nivel de sofisticación de modelo, controlando la serie y el horizonte temporal?"
+
+**Tabla B — Comparación a escala productiva (30,490 series, 2 modelos):**
+BQML ARIMA_PLUS vs LightGBM, dataset completo. ARIMA clásico queda fuera por diseño —
+nunca se entrenó a esa escala (ver Fase 4a). Responde: "¿qué tan bien funciona esto sobre
+todo el catálogo?", la pregunta relevante para producción.
+
+Ambas tablas, desglosadas por:
 - Pinball Loss por modelo × percentil
 - Pinball Loss por categoría (FOODS, HOBBIES, HOUSEHOLD)
 - Análisis de casos difíciles:
-  - Series con >50% ceros
+  - Series con >50% ceros (usar `categoria_zero_rate` de `m5_dataset.series_segments`,
+    ya calculada en Fase 4)
   - Productos nuevos sin historia
   - Semanas con eventos especiales
-- Tabla comparativa final: ARIMA → BQML → LightGBM
 
-**Entregable:** Notebook `02_evaluation.ipynb` con todas las comparativas y análisis de errores.
+**Entregable:** Notebook `02_evaluation.ipynb` con ambas tablas comparativas y análisis de errores.
 
 ---
 
@@ -434,14 +475,35 @@ m5_dataset.agg_weekly_comparison
 | Componente | Costo estimado |
 |---|---|
 | BigQuery storage + queries dev | ~$0–2 |
+| **BQML ARIMA_PLUS `CREATE MODEL`** (`auto_arima_max_order=4`, ver nota abajo) | **~$16** |
 | Vertex AI Training (LightGBM, n1-standard-8, ~2hr) | ~$0.80 |
 | Vertex AI Batch Prediction (1 job) | ~$1–2 |
 | GCS storage | ~$0.10 |
 | Cloud Workstations (~$0.60/hr, uso activo) | Variable |
 | Looker Studio | Gratis |
-| **Total estimado** | **~$10–15 USD** |
+| **Total estimado** | **~$21–30 USD** |
 
 Con $300 de crédito inicial de GCP: costo efectivo $0.
+
+**⚠️ Nota sobre el costo de BQML ARIMA_PLUS:** los modelos de series de tiempo en BQML se
+cobran a $312.50/TiB (no la tarifa normal de $6.25/TiB de queries), y con `auto_arima`
+activado (default) el costo se multiplica por la cantidad de modelos candidato evaluados
+internamente. Para las 30,490 series de `sales_long` (~1.87 GB de columnas necesarias:
+item_id, store_id, date, sales), el estimado sin multiplicador es ~$0.53. Con
+`auto_arima_max_order = 4` (elegido para Fase 4b): multiplicador 30x → ~$15.94 estimado.
+Tabla completa de referencia por nivel:
+
+| `auto_arima_max_order` | Multiplicador | Costo estimado |
+|---|---|---|
+| 1 | 6x | ~$3.19 |
+| 2 | 12x | ~$6.38 |
+| 3 | 20x | ~$10.63 |
+| **4 (elegido)** | **30x** | **~$15.94** |
+| 5 (default) | 42x | ~$22.31 |
+
+BQML no muestra un estimador de bytes antes de correr `CREATE MODEL` (a diferencia de
+queries normales) — confirmar el costo real después de entrenar vía Cloud Logging, filtrando
+por `jobConfiguration.query.statementType="CREATE_MODEL"` y el campo `totalBilledBytes`.
 
 ---
 
