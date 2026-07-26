@@ -58,6 +58,15 @@ AUTO_ARIMA_KWARGS = dict(
     stepwise=True,
     suppress_warnings=False,
     error_action="ignore",
+    # default de statsmodels/pmdarima es maxiter=50 -- insuficiente para el
+    # solver L-BFGS-B con series de 365 puntos y ordenes de hasta (5,2,5):
+    # mas parametros a estimar y una superficie de verosimilitud mas
+    # compleja necesitan mas iteraciones para asentar, no indican una serie
+    # genuinamente problematica. 200 da 4x margen sin ocultar series que
+    # realmente no convergen (esas seguiran fallando incluso con mas
+    # iteraciones -- el objetivo es dejar de confundir "necesita mas pasos"
+    # con "no converge").
+    maxiter=200,
 )
 
 # Umbral de varianza de residuos por debajo del cual el modelo se considera
