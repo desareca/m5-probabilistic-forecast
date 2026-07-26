@@ -43,8 +43,11 @@ wheels/
 *.lock
 credentials/
 
-# Models & large artifacts
-models/
+# Models & large artifacts (solo en la raiz -- /models/, no src/models/ que
+# es codigo fuente. Sin la barra inicial, el patron matcheaba cualquier
+# carpeta llamada "models" en cualquier nivel, incluyendo src/models/,
+# y silenciosamente excluia el codigo de esa carpeta de git)
+/models/
 *.h5
 *.pkl
 *.joblib
