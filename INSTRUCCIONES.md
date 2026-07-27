@@ -261,6 +261,25 @@ OPTIONS(
 ) AS ...
 ```
 
+**Resultado real de la corrida (smoke test, un fold):**
+- `CREATE MODEL`: 59.88 GB facturados (~$18.27 real, vs ~$15.94 estimado — diferencia
+  esperable, el estimado previo usaba bytes/fila aproximados), 4 min 42 s de duración,
+  30,490/30,490 series generaron modelo válido (`ML.ARIMA_EVALUATE` confirma cobertura
+  completa, sin descartes silenciosos)
+- Cuantiles derivados de `forecast_value + z·standard_error` (ver `sql/predict_bqml_arima.sql`)
+  — **22 de 30,490 series (0.07%) tienen `standard_error = NaN`** en `ML.FORECAST`, lo que
+  produce `p05/p25/p75/p95 = NaN` (p50 queda válido, no depende de `standard_error`). 20 de
+  esas 22 son `categoria_zero_rate = muy_lento`, las otras 2 son `lento` en el extremo alto —
+  mismo patrón de fondo que la no convergencia de ARIMA clásico en series intermitentes (4a),
+  pero con tasa de fallo mucho menor: **0.17% de las series `muy_lento` (20/11,783)**, vs
+  **12.5% en la muestra de ARIMA clásico (1/8)**. BQML ARIMA_PLUS resultó considerablemente
+  más robusto a escala — probablemente por su pipeline interno (STL, manejo de spikes/dips)
+  que suaviza casos degenerados antes de estimar varianza
+- No hay fallback silencioso, mismo criterio que 4a: `m5_dataset.bqml_metadata` documenta
+  `fallo_incertidumbre` por serie (ver `sql/build_bqml_metadata.sql`), tabla espejo de
+  `arima_metadata`. Validación completa (conteo de filas, monotonicidad, valores negativos,
+  diagnóstico del hallazgo) en `sql/validate_bqml_predictions.sql`
+
 #### 4c. LightGBM Cuantil
 
 **Alcance del smoke test (Fase 4):** un solo fold, el más reciente — reutiliza directo el
