@@ -288,7 +288,18 @@ OPTIONS(
 TRAIN: 365 días inmediatamente antes de VAL
 VAL:   últimos 28 días del rango de sales_long (esquema temporal de Fase 5)
 ```
-Escala: 30,490 series × 365 días ≈ 11.1M filas de train, ~853K filas de VAL a predecir.
+
+**⚠️ Escala: `m5_dataset.lgbm_sample` (~3,000 series), no las 30,490 completas.**
+30,490 series × 365 días (~11.1M filas) tumbó la Workstation por OOM incluso en
+`e2-highmem-4` (32GB) y, sin early stopping, cada fold tomaba ~1.5–2.5h — inviable
+multiplicado por los folds de Fase 5. `lgbm_sample` es una muestra **proporcional**
+a la distribución real de `categoria_zero_rate` (a diferencia de `arima_sample`,
+que es balanceada a propósito) — el objetivo acá es aproximar el comportamiento a
+escala completa, no comparar regímenes. Ver `sql/build_lgbm_sample.sql`.
+**Esto implica que la Tabla B de Fase 6 deja de ser "ambos modelos a escala
+completa" — queda BQML ARIMA_PLUS a 30,490 series vs LightGBM a ~3,000 (muestra
+representativa). Hay que nombrarlo con precisión en el análisis, no como
+comparación simétrica.**
 
 **Target:** `sales` (incluido en `features_train`).
 
@@ -401,14 +412,18 @@ def pinball_loss(y_true, y_pred, quantile):
 **Tabla A — Comparación de sofisticación de modelo (32 series, los 3 modelos):**
 ARIMA clásico vs BQML ARIMA_PLUS vs LightGBM, evaluados **exactamente sobre la muestra
 estratificada de 32 series de Fase 4a y los mismos folds del walk-forward**. No requiere
-re-entrenar BQML/LightGBM — se filtran sus predicciones (ya calculadas sobre las 30,490
-series completas) por `item_id+store_id IN (muestra_32)`. Responde: "¿cuánto mejora cada
-nivel de sofisticación de modelo, controlando la serie y el horizonte temporal?"
+re-entrenar BQML/LightGBM — se filtran sus predicciones ya calculadas (BQML sobre las
+30,490 series completas; LightGBM sobre `lgbm_sample`, que garantiza incluir las 32 series
+de `arima_sample` — ver `sql/build_lgbm_sample.sql`) por `item_id+store_id IN (muestra_32)`.
+Responde: "¿cuánto mejora cada nivel de sofisticación de modelo, controlando la serie y el
+horizonte temporal?"
 
-**Tabla B — Comparación a escala productiva (30,490 series, 2 modelos):**
-BQML ARIMA_PLUS vs LightGBM, dataset completo. ARIMA clásico queda fuera por diseño —
-nunca se entrenó a esa escala (ver Fase 4a). Responde: "¿qué tan bien funciona esto sobre
-todo el catálogo?", la pregunta relevante para producción.
+**Tabla B — Comparación a escala productiva:**
+BQML ARIMA_PLUS (30,490 series completas) vs LightGBM (`m5_dataset.lgbm_sample`, ~3,000
+series, muestra proporcional a la distribución real — ver Fase 4c). **No es una comparación
+simétrica de escala** — se nombra así explícitamente en el análisis, no como "ambos a escala
+completa". ARIMA clásico queda fuera por diseño — nunca se entrenó a esa escala (ver Fase 4a).
+Responde: "¿qué tan bien funciona esto sobre una porción representativa grande del catálogo?"
 
 Ambas tablas, desglosadas por:
 - Pinball Loss por modelo × percentil
