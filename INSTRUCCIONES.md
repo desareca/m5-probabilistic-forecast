@@ -332,11 +332,32 @@ params = {
 }
 ```
 
-- Entrenado en Vertex AI Custom Training Job (n1-standard-8)
-- Artefactos: 5 archivos `.txt` (`booster.save_model()`), uno por cuantil, guardados en GCS
+- Entrenado directo en la Cloud Workstation para este smoke test (no Vertex AI Custom
+  Training Job — eso queda para Fase 7/escala productiva, aquí basta con la Workstation)
+- Artefactos: 5 archivos `.txt` (`booster.save_model()`), uno por cuantil — se guardan
+  localmente y se descartan al cerrar la sesión (Workstation efímera, ver
+  `phase-summaries/01b-workstation-efimera.md`); no es necesario persistirlos para este
+  smoke test, ya que Fase 5 reentrena desde cero en cada fold de todas formas
 - Predicciones guardadas en `m5_dataset.predictions_lgbm`
   `(item_id, store_id, date, p05, p25, p50, p75, p95)` — mismo esquema que 4a/4b para que
   las Tablas A/B de Fase 6 puedan compararlos directo
+
+**Resultado real de la corrida (smoke test, un fold, sobre `lgbm_sample` ~3,000 series):**
+- Fetch de TRAIN: 1,095,365 filas × 50 columnas (~16s). Entrenamiento de los 5 modelos:
+  ~16 minutos totales (~3-4 min por modelo). Fetch de VAL + predicción + escritura: ~30s
+- Validación (3 checks, todos pasados): 84,028 filas = 3,001 series × 28 días exacto;
+  0 violaciones de monotonicidad (`np.sort` funcionó como se esperaba); 0 valores
+  negativos o NULL
+- **Iteración real de la fase:** el primer intento a escala completa (30,490 series)
+  tumbó la Workstation por OOM incluso después de 4 rondas de optimización de memoria
+  en el código (dtypes reducidos, exclusión de columnas no usadas, `Dataset` único
+  reutilizado) — la causa raíz era tamaño de máquina, no eficiencia de código. Se subió
+  `e2-standard-4` (16GB) → `e2-highmem-4` (32GB) en `terraform/workstation.tf`, y se
+  redujo el entrenamiento a `m5_dataset.lgbm_sample` (~3,000 series, muestra
+  proporcional) por viabilidad de tiempo pensando en Fase 5 — ver nota de escala arriba
+- Bug corregido: BigQuery no soporta comparación de tupla `(a, b) IN (SELECT a, b ...)`
+  (error: "Subquery of type IN must have only one output column") — se usa
+  `STRUCT(item_id, store_id) IN (SELECT STRUCT(...) ...)` en su lugar
 
 **Entregable:** 3 modelos entrenados, predicciones guardadas en BigQuery.
 
