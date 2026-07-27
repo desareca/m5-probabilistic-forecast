@@ -392,13 +392,19 @@ cubren exactamente TRAIN + CV + VAL. Los 28 días de TEST son la diferencia con
 - Horizonte de predicción: 28 días por fold
 - Aplicar a los 3 modelos con la misma lógica y mismo tamaño de ventana
 - Para LightGBM: regenerar features respetando el corte temporal de cada fold
-- **Consistencia de alcance entre modelos:** los folds (mismos cortes de fecha, mismo
-  `window_size`) se generan una sola vez y se aplican consistentemente, pero no todos los
-  modelos corren sobre las mismas series: LightGBM y BQML ARIMA_PLUS corren cada fold sobre
-  las 30,490 series completas; ARIMA clásico corre los mismos folds pero solo sobre la
-  muestra estratificada de 32 series (Fase 4a). Esto es necesario para que la Tabla A de
-  Fase 6 (comparación de 32 series, 3 modelos) sea válida — mismos folds, mismas series,
-  entre los tres.
+- **Consistencia de alcance entre modelos (decisión revisada post-4c):** los folds (mismos
+  cortes de fecha, mismo `window_size`) se generan una sola vez y se aplican
+  consistentemente. **BQML ARIMA_PLUS y LightGBM corren cada fold sobre `m5_dataset.lgbm_sample`
+  (~3,000 series, muestra proporcional)**, no las 30,490 completas — decisión de alcance
+  para todo el proyecto de acá en adelante (Fases 5–9): dado que es un proyecto de
+  portfolio, entrenar/servir/visualizar a escala completa no aporta valor adicional
+  proporcional al tiempo y costo que agrega (BQML: ~$18/fold × 5 folds ≈ $90 a escala
+  completa vs ~$9 al 10%; LightGBM ya estaba forzado a esta escala por memoria/tiempo,
+  ver Fase 4c). El entrenamiento de BQML a escala completa de Fase 4b (ya pagado, $18.27)
+  se conserva como referencia de "cómo se comporta a escala real", pero las comparaciones
+  oficiales de Fase 6 en adelante usan la versión filtrada a `lgbm_sample`. ARIMA clásico
+  sigue sobre la muestra estratificada de 32 series (Fase 4a) — ya son un subconjunto de
+  `lgbm_sample` (`arima_sample` está garantizada dentro, ver `sql/build_lgbm_sample.sql`).
 
 **Decisión tomada (post-EDA): `window_size = 365` días.** Justificación: la ACF de la serie
 agregada (detrended) muestra una meseta de 0.42–0.44 entre lag=365 y lag=546 (eco anual real,
@@ -428,23 +434,26 @@ def pinball_loss(y_true, y_pred, quantile):
     return np.mean(np.maximum(quantile * error, (quantile - 1) * error))
 ```
 
-**Análisis requerido:**
+**Análisis requerido (estructura simplificada tras la decisión de Fase 5 — todo el proyecto
+al mismo alcance de ~3,000 series desde acá en adelante, ya no hace falta distinguir
+"escala muestra" vs "escala completa"):**
 
 **Tabla A — Comparación de sofisticación de modelo (32 series, los 3 modelos):**
 ARIMA clásico vs BQML ARIMA_PLUS vs LightGBM, evaluados **exactamente sobre la muestra
-estratificada de 32 series de Fase 4a y los mismos folds del walk-forward**. No requiere
-re-entrenar BQML/LightGBM — se filtran sus predicciones ya calculadas (BQML sobre las
-30,490 series completas; LightGBM sobre `lgbm_sample`, que garantiza incluir las 32 series
-de `arima_sample` — ver `sql/build_lgbm_sample.sql`) por `item_id+store_id IN (muestra_32)`.
-Responde: "¿cuánto mejora cada nivel de sofisticación de modelo, controlando la serie y el
-horizonte temporal?"
+estratificada de 32 series de Fase 4a y los mismos folds del walk-forward**. Se filtran las
+predicciones ya calculadas de los 3 modelos (todos corren sobre `lgbm_sample`, que garantiza
+incluir las 32 series de `arima_sample`) por `item_id+store_id IN (muestra_32)`. Responde:
+"¿cuánto mejora cada nivel de sofisticación de modelo, controlando la serie y el horizonte
+temporal?"
 
-**Tabla B — Comparación a escala productiva:**
-BQML ARIMA_PLUS (30,490 series completas) vs LightGBM (`m5_dataset.lgbm_sample`, ~3,000
-series, muestra proporcional a la distribución real — ver Fase 4c). **No es una comparación
-simétrica de escala** — se nombra así explícitamente en el análisis, no como "ambos a escala
-completa". ARIMA clásico queda fuera por diseño — nunca se entrenó a esa escala (ver Fase 4a).
-Responde: "¿qué tan bien funciona esto sobre una porción representativa grande del catálogo?"
+**Tabla B — Comparación a escala de `lgbm_sample` (~3,000 series, 2 modelos):**
+BQML ARIMA_PLUS vs LightGBM, ambos sobre `m5_dataset.lgbm_sample` (muestra proporcional a la
+distribución real de `categoria_zero_rate`). ARIMA clásico queda fuera por diseño — nunca se
+entrenó a esa escala (ver Fase 4a). Responde: "¿qué tan bien funciona esto sobre una porción
+representativa del catálogo?" — ya no es una comparación de escala productiva real (30,490),
+sino la comparación estándar del proyecto de acá en adelante. El entrenamiento de BQML a
+escala completa de Fase 4b ($18.27, 30,490 series) puede citarse aparte como referencia de
+"cómo se comporta a escala real", fuera de esta tabla oficial.
 
 Ambas tablas, desglosadas por:
 - Pinball Loss por modelo × percentil
@@ -462,6 +471,11 @@ Ambas tablas, desglosadas por:
 ### Fase 7 — MLOps
 
 **Objetivo:** Pipeline reproducible y modelo registrado en Vertex AI.
+
+**⚠️ Alcance:** el pipeline entrena/reentrena sobre `m5_dataset.lgbm_sample` (~3,000 series),
+no las 30,490 completas — misma decisión de Fase 5, consistente con todo lo evaluado en
+Fase 6. Evita inflar el costo y tiempo de cada corrida del pipeline sin aportar valor
+adicional para un proyecto de portfolio.
 
 **Tareas:**
 1. Empaquetar training en Docker y subir a Artifact Registry
@@ -482,6 +496,11 @@ Ambas tablas, desglosadas por:
 ### Fase 8 — Tablas agregadas
 
 **Objetivo:** Tablas livianas en BigQuery optimizadas para Looker Studio.
+
+**⚠️ Alcance:** las tablas agregadas cubren solo las series de `lgbm_sample` (~3,000,
+~10% del catálogo) — no todo M5. Debe quedar explícito en el propio dashboard (Fase 9),
+no como limitación oculta: es una decisión de diseño consciente para un proyecto de
+portfolio, no una limitación técnica.
 
 **Tablas a crear (post batch prediction):**
 
@@ -512,6 +531,12 @@ m5_dataset.agg_weekly_comparison
 ### Fase 9 — Dashboard Looker Studio
 
 **Objetivo:** Dashboard público compartible que muestre los resultados.
+
+**Nota visible en el dashboard:** incluir un texto/tarjeta indicando que cubre una muestra
+representativa de ~3,000 series (~10% del catálogo M5, `m5_dataset.lgbm_sample`,
+proporcional por tasa de intermitencia), no las 30,490 series completas — decisión de
+alcance para un proyecto de portfolio, no una limitación técnica. Ver Fase 5 para el
+razonamiento completo.
 
 **Conexión:** Looker Studio → BigQuery → tablas agregadas
 
