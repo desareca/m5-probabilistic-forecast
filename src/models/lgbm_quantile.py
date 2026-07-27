@@ -161,12 +161,22 @@ def train_models(train_df: pd.DataFrame) -> dict[str, lgb.Booster]:
 
     os.makedirs(MODEL_DIR, exist_ok=True)
 
+    # Un solo Dataset, construido una vez y reutilizado para los 5
+    # lgb.train() (alpha es el unico param que cambia entre quantiles, no
+    # afecta el binning) -- evita reconstruir el binning 5 veces sobre las
+    # mismas 11.1M filas. free_raw_data=True (default real de LightGBM, no
+    # el False anterior) libera la copia interna de los datos crudos que el
+    # Dataset mantendria despues de construct(); aca no hace falta, el
+    # train_set no se vuelve a reconstruir ni a re-etiquetar.
+    logger.info("Construyendo Dataset de entrenamiento (una sola vez para los 5 quantiles)...")
+    train_set = lgb.Dataset(X_train, label=y_train, free_raw_data=True)
+    train_set.construct()
+
     boosters = {}
     for q_name, alpha in QUANTILE_LEVELS.items():
         params = {**BASE_PARAMS, "objective": "quantile", "alpha": alpha}
 
         logger.info(f"Entrenando modelo {q_name} (alpha={alpha})...")
-        train_set = lgb.Dataset(X_train, label=y_train, free_raw_data=False)
         booster = lgb.train(params, train_set)
 
         model_path = os.path.join(MODEL_DIR, f"lgbm_{q_name}.txt")
