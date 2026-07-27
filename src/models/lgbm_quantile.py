@@ -2,7 +2,9 @@
 LightGBM Quantile -- Fase 4c, smoke test.
 
 Entrena 5 modelos independientes (uno por percentil P5/P25/P50/P75/P95,
-objective='quantile') sobre m5_dataset.features_train, con hiperparametros
+objective='quantile') sobre m5_dataset.features_train, filtrado a
+m5_dataset.lgbm_sample (~3,000 series, muestra proporcional -- no las
+30,490 completas; ver sql/build_lgbm_sample.sql), con hiperparametros
 fijos y sin early stopping -- smoke test simple y deterministico, no el
 walk-forward completo (eso lo hace Fase 5 reutilizando esta misma logica).
 
@@ -19,13 +21,17 @@ LightGBM los maneja nativamente.
 Quantile crossing: los 5 valores predichos por fila se ordenan (np.sort)
 antes de guardar, garantizando monotonicidad P5 <= P25 <= P50 <= P75 <= P95.
 
-Manejo de memoria (e2-standard-4, 16GB RAM): TRAIN (~11.1M filas) y VAL
-(~853K filas) se traen con dos queries separadas, nunca combinadas en
-memoria a la vez, y las columnas FLOAT64 se piden directo como float32 via
-el parametro dtypes de to_dataframe() -- evita el pico de memoria de
+Manejo de memoria (e2-standard-4, 16GB RAM): TRAIN (~1.1M filas con
+lgbm_sample, ~10% del volumen de las 30,490 series completas) y VAL (~84K
+filas) se traen con dos queries separadas, nunca combinadas en memoria a
+la vez, y las columnas FLOAT64 se piden directo como float32 via el
+parametro dtypes de to_dataframe() -- evita el pico de memoria de
 materializar todo en float64 para despues downcastear. train_df se libera
-explicitamente (del + gc.collect()) antes de traer val_df. Este mismo
-patron lo reutilizara Fase 5 en cada fold del walk-forward.
+explicitamente (del + gc.collect()) antes de traer val_df. Esta reduccion
+de memoria se penso para las 30,490 series completas y a esta escala
+(~1.1M filas) probablemente ya no sea necesaria, pero se deja tal cual
+hasta confirmar que corre bien. Este mismo patron lo reutilizara Fase 5 en
+cada fold del walk-forward.
 
 Uso:
     python -m src.models.lgbm_quantile
@@ -53,6 +59,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 FEATURES_TABLE = f"{PROJECT}.{DATASET}.features_train"
+LGBM_SAMPLE_TABLE = f"{PROJECT}.{DATASET}.lgbm_sample"
 PREDICTIONS_TABLE = f"{PROJECT}.{DATASET}.predictions_lgbm"
 
 MODEL_DIR = "models/lgbm_quantile"
@@ -143,7 +150,9 @@ def _fetch_features_window(
     """
     Trae features_train filtrado a [start, end_exclusive) -- ventana abierta
     a la derecha para que TRAIN y VAL se puedan pedir con dos queries
-    separadas sin traslapar ni dejar huecos en el corte (val_start).
+    separadas sin traslapar ni dejar huecos en el corte (val_start) -- y
+    tambien filtrado a las series de lgbm_sample (~3,000, muestra
+    proporcional; ver sql/build_lgbm_sample.sql), no las 30,490 completas.
 
     dtypes pide las columnas ya reducidas (float32 / int8 / int16) en la
     conversion Arrow -> pandas, evitando el pico de memoria de traer todo
@@ -151,7 +160,7 @@ def _fetch_features_window(
 
     exclude_id_cols=True (usado para TRAIN) hace SELECT * EXCEPT (item_id,
     store_id) -- esas dos columnas ya se excluyen como features en
-    train_models(), asi que no tiene sentido cargarlas para las 11.1M filas
+    train_models(), asi que no tiene sentido cargarlas para las ~1.1M filas
     de TRAIN. VAL si las necesita (identifican las predicciones de salida).
     """
     select_clause = "* EXCEPT (item_id, store_id)" if exclude_id_cols else "*"
@@ -159,6 +168,9 @@ def _fetch_features_window(
         SELECT {select_clause}
         FROM `{FEATURES_TABLE}`
         WHERE date >= @start AND date < @end_exclusive
+          AND (item_id, store_id) IN (
+            SELECT item_id, store_id FROM `{LGBM_SAMPLE_TABLE}`
+          )
     """
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
@@ -209,7 +221,7 @@ def train_models(train_df: pd.DataFrame) -> dict[str, lgb.Booster]:
     # Un solo Dataset, construido una vez y reutilizado para los 5
     # lgb.train() (alpha es el unico param que cambia entre quantiles, no
     # afecta el binning) -- evita reconstruir el binning 5 veces sobre las
-    # mismas 11.1M filas. free_raw_data=True (default real de LightGBM, no
+    # mismas ~1.1M filas. free_raw_data=True (default real de LightGBM, no
     # el False anterior) libera la copia interna de los datos crudos que el
     # Dataset mantendria despues de construct(); aca no hace falta, el
     # train_set no se vuelve a reconstruir ni a re-etiquetar.
@@ -262,9 +274,9 @@ def run_lgbm_quantile() -> pd.DataFrame:
     dtypes = get_reduced_memory_dtypes(client)
 
     # TRAIN y VAL se traen y liberan por separado -- nunca coexisten en
-    # memoria las ~11.98M filas combinadas, solo ~11.1M y luego ~853K.
-    # TRAIN excluye item_id/store_id (exclude_id_cols=True): ya se excluyen
-    # como features en train_models(), no hace falta cargarlas.
+    # memoria las ~1.18M filas combinadas (lgbm_sample), solo ~1.1M y
+    # luego ~84K. TRAIN excluye item_id/store_id (exclude_id_cols=True):
+    # ya se excluyen como features en train_models(), no hace falta cargarlas.
     train_df = _fetch_features_window(
         client, train_start, val_start, dtypes, label="train", exclude_id_cols=True
     )
