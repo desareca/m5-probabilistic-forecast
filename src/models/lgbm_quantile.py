@@ -168,8 +168,8 @@ def _fetch_features_window(
         SELECT {select_clause}
         FROM `{FEATURES_TABLE}`
         WHERE date >= @start AND date < @end_exclusive
-          AND (item_id, store_id) IN (
-            SELECT item_id, store_id FROM `{LGBM_SAMPLE_TABLE}`
+          AND STRUCT(item_id, store_id) IN (
+            SELECT STRUCT(item_id, store_id) FROM `{LGBM_SAMPLE_TABLE}`
           )
     """
     job_config = bigquery.QueryJobConfig(
