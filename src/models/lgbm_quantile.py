@@ -89,36 +89,74 @@ BASE_PARAMS = {
     "verbosity": -1,
 }
 
+# Downcast explicito de columnas INT64 de bajo rango -- BigQuery las tipa
+# genericamente como INTEGER (8 bytes), pero su rango real cabe en 1-2
+# bytes. int8/int16 de numpy, NO los nullable Int8/Int16 de pandas -- estos
+# ultimos tienen antecedentes de ser rechazados por LightGBM
+# (_get_bad_pandas_dtypes) y no vale la pena arriesgar un ValueError.
+# Solo se piden directo en el dtypes de to_dataframe() las columnas que
+# nunca traen NULL (deterministicas, derivadas de la fecha); year excede el
+# rango de int8 (valores 2011-2016) por eso usa int16. price_changed y
+# snap_active SI pueden traer NULL (ver build_features_train.sql) y se
+# manejan aparte: se dejan en su dtype default (float64, ya soporta NaN sin
+# problema) y se rellenan con un centinela -1 + astype('int8') en
+# cast_categoricals(), antes del cast a category.
+INT_DOWNCAST_DTYPES = {
+    "day_of_week": "int8",
+    "day_of_month": "int8",
+    "month": "int8",
+    "year": "int16",
+    "week_of_year": "int8",
+    "is_event": "int8",
+    "is_christmas": "int8",
+}
 
-def get_float32_dtypes(client: bigquery.Client) -> dict[str, str]:
+# Columnas categoricas que pueden traer NULL -- se rellenan con este
+# centinela y se bajan a int8 en cast_categoricals(), en vez de pedirse
+# directo como int8 en el dtypes de to_dataframe() (fallaria: numpy int8
+# no soporta NaN).
+NULLABLE_INT_SENTINEL_COLS = ["price_changed", "snap_active"]
+SENTINEL_VALUE = -1
+
+
+def get_reduced_memory_dtypes(client: bigquery.Client) -> dict[str, str]:
     """
-    Mapa {columna: 'float32'} para todas las columnas FLOAT64 de
-    features_train (lags, rolling stats, Fourier, features de precio --
-    la mayoria de las ~50 columnas y el grueso del peso en memoria).
-    client.get_table() es metadata pura, no escanea datos ni cuesta.
+    Mapa {columna: dtype} para pedirle a to_dataframe() que descargue ya
+    reducido: columnas FLOAT64 -> float32 (lags, rolling stats, Fourier,
+    precio -- el grueso de las ~50 columnas) y las INT64 de bajo rango sin
+    NULL de INT_DOWNCAST_DTYPES -> int8/int16. client.get_table() es
+    metadata pura, no escanea datos ni cuesta.
     """
     table = client.get_table(FEATURES_TABLE)
-    return {field.name: "float32" for field in table.schema if field.field_type in ("FLOAT", "FLOAT64")}
+    float_dtypes = {field.name: "float32" for field in table.schema if field.field_type in ("FLOAT", "FLOAT64")}
+    return {**float_dtypes, **INT_DOWNCAST_DTYPES}
 
 
 def _fetch_features_window(
     client: bigquery.Client,
     start: pd.Timestamp,
     end_exclusive: pd.Timestamp,
-    float_dtypes: dict[str, str],
+    dtypes: dict[str, str],
     label: str,
+    exclude_id_cols: bool = False,
 ) -> pd.DataFrame:
     """
     Trae features_train filtrado a [start, end_exclusive) -- ventana abierta
     a la derecha para que TRAIN y VAL se puedan pedir con dos queries
     separadas sin traslapar ni dejar huecos en el corte (val_start).
 
-    dtypes=float_dtypes pide las columnas FLOAT64 directo como float32 en
-    la conversion Arrow -> pandas, evitando el pico de memoria de traer
-    todo en float64 para downcastear despues.
+    dtypes pide las columnas ya reducidas (float32 / int8 / int16) en la
+    conversion Arrow -> pandas, evitando el pico de memoria de traer todo
+    en float64/int64 para downcastear despues.
+
+    exclude_id_cols=True (usado para TRAIN) hace SELECT * EXCEPT (item_id,
+    store_id) -- esas dos columnas ya se excluyen como features en
+    train_models(), asi que no tiene sentido cargarlas para las 11.1M filas
+    de TRAIN. VAL si las necesita (identifican las predicciones de salida).
     """
+    select_clause = "* EXCEPT (item_id, store_id)" if exclude_id_cols else "*"
     query = f"""
-        SELECT *
+        SELECT {select_clause}
         FROM `{FEATURES_TABLE}`
         WHERE date >= @start AND date < @end_exclusive
     """
@@ -128,7 +166,7 @@ def _fetch_features_window(
             bigquery.ScalarQueryParameter("end_exclusive", "DATE", end_exclusive.date()),
         ]
     )
-    df = client.query(query, job_config=job_config).to_dataframe(dtypes=float_dtypes)
+    df = client.query(query, job_config=job_config).to_dataframe(dtypes=dtypes)
     df["date"] = pd.to_datetime(df["date"])
     logger.info(f"features_train ({label}): {len(df)} filas, {df.shape[1]} columnas")
     return df
@@ -149,7 +187,14 @@ def cast_categoricals(df: pd.DataFrame) -> pd.DataFrame:
     guardado desde disco (Booster(model_file=...)) para predecir en un
     proceso separado, pandas_categorical no se serializa y habria que
     resolver el alineamiento de categorias explicitamente en ese momento.
+
+    price_changed/snap_active llegan en su dtype default (float64, puede
+    traer NaN) -- se rellenan con el centinela SENTINEL_VALUE (-1, fuera
+    del rango real 0/1) y se bajan a int8 antes del cast a category, para
+    no depender de los tipos nullable Int8/Int16 de pandas.
     """
+    for col in NULLABLE_INT_SENTINEL_COLS:
+        df[col] = df[col].fillna(SENTINEL_VALUE).astype("int8")
     df[CATEGORICAL_COLS] = df[CATEGORICAL_COLS].astype("category")
     return df
 
@@ -214,18 +259,25 @@ def run_lgbm_quantile() -> pd.DataFrame:
     client = get_bq_client()
 
     train_start, val_start, val_end = fetch_date_window(client)
-    float_dtypes = get_float32_dtypes(client)
+    dtypes = get_reduced_memory_dtypes(client)
 
     # TRAIN y VAL se traen y liberan por separado -- nunca coexisten en
     # memoria las ~11.98M filas combinadas, solo ~11.1M y luego ~853K.
-    train_df = _fetch_features_window(client, train_start, val_start, float_dtypes, label="train")
+    # TRAIN excluye item_id/store_id (exclude_id_cols=True): ya se excluyen
+    # como features en train_models(), no hace falta cargarlas.
+    train_df = _fetch_features_window(
+        client, train_start, val_start, dtypes, label="train", exclude_id_cols=True
+    )
     train_df = cast_categoricals(train_df)
     boosters = train_models(train_df)
 
     del train_df
     gc.collect()
 
-    val_df = _fetch_features_window(client, val_start, val_end + pd.Timedelta(days=1), float_dtypes, label="val")
+    # VAL si necesita item_id/store_id -- identifican las predicciones de salida.
+    val_df = _fetch_features_window(
+        client, val_start, val_end + pd.Timedelta(days=1), dtypes, label="val", exclude_id_cols=False
+    )
     val_df = cast_categoricals(val_df)
     predictions_df = predict_quantiles(boosters, val_df)
 
