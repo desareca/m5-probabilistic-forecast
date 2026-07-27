@@ -3,9 +3,11 @@
 # ─────────────────────────────────────────────────────────────────────────
 #
 # Decisiones tomadas (2026-07-04):
-#   - Machine type: e2-standard-4 (4 vCPU / 16GB). El trabajo pesado corre
-#     en BigQuery y Vertex AI, no en la Workstation, así que no se necesita
-#     más potencia aquí.
+#   - Machine type: e2-highmem-4 (4 vCPU / 32GB RAM). Originalmente
+#     e2-standard-4 (16GB) -- subido el 2026-07-27 tras OOM recurrente
+#     entrenando LightGBM sobre features_train a escala completa (Fase 4c,
+#     ~11.1M filas x 50 columnas). Ver el comentario junto a machine_type
+#     mas abajo para el detalle completo.
 #   - Idle timeout: GCP no permite desactivarlo del todo (mínimo requerido
 #     por la API), así que se fija en el máximo permitido (24h) como red de
 #     seguridad silenciosa. El apagado real sigue siendo manual, según lo
@@ -76,7 +78,16 @@ resource "google_workstations_workstation_config" "m5_config" {
 
   host {
     gce_instance {
-      machine_type                 = "e2-standard-4"
+      # e2-highmem-4 (4 vCPU / 32GB), no e2-standard-4 (16GB) -- subido el
+      # 2026-07-27 despues de que el entrenamiento de LightGBM (Fase 4c,
+      # ~11.1M filas x 50 columnas) tumbara la VM completa por OOM incluso
+      # tras 4 rondas de optimizacion de memoria en el codigo (dtypes
+      # reducidos, exclusion de columnas no usadas, Dataset unico
+      # reutilizado). El cuello de botella era memoria, no CPU -- por eso
+      # highmem (mismos 4 vCPU, RAM x2) en vez de subir a un tamano mayor
+      # de standard. Diferencia de costo: ~$0.05/hora vs e2-standard-4,
+      # marginal para el patron de uso esporadico de este proyecto.
+      machine_type                 = "e2-highmem-4"
       boot_disk_size_gb            = 100
       disable_public_ip_addresses  = false
       service_account               = data.google_service_account.m5_sa.email
