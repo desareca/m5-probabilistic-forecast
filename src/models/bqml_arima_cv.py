@@ -93,7 +93,19 @@ VAL_DAYS = 28
 
 # BQML time-series se cobra a $312.50/TiB (vs $6.25/TiB de queries normales)
 BQML_RATE_USD_PER_TIB = 312.50
-BQML_COST_MULTIPLIER = 30  # ver docstring -- estimado, no exacto
+# OJO -- el multiplicador ~30x documentado en sql/train_bqml_arima.sql
+# (auto_arima interno evaluando candidatos) se calibro sobre el run de
+# referencia de 4b: 30,490 series, historial completo. Confirmado en la
+# practica que NO se sostiene a esta escala -- fold 5 sobre SOURCE_TABLE
+# (~3,000 series, ventana de 365 dias) dio dry_run=1.21 GB y bytes_billed
+# REAL=1.21 GB, practicamente 1:1, no 30:1. La hipotesis de que el
+# multiplicador era una constante fija de auto_arima_max_order=4 era
+# incorrecta -- parece escalar con el volumen de datos/series de forma
+# mas compleja, no como un factor constante. Se deja en 1 (sin corregir)
+# y el estimado pre-flight se marca explicitamente como "minimo, no
+# definitivo" -- confiar en el numero REAL post-CREATE MODEL (bytes_billed),
+# no en este estimado, para decisiones de presupuesto.
+BQML_COST_MULTIPLIER = 1
 
 # z-scores de la normal estandar -- mismo criterio que predict_bqml_arima.sql
 # y src/models/arima_baseline.py (Fase 4a), para comparacion consistente.
@@ -262,11 +274,12 @@ def run_fold(client: bigquery.Client, fold: pd.Series, segments_df: pd.DataFrame
     dry_bytes = dry_run_create_model(client, fold_id, train_start, train_end)
     est_cost = estimate_cost_usd(dry_bytes)
     logger.info(
-        f"  Estimado (dry run x{BQML_COST_MULTIPLIER}, aproximado): "
-        f"{dry_bytes / 1e9:.2f} GB escaneados -> ~${est_cost:.2f}"
+        f"  Estimado minimo (dry run, sin garantia -- ver nota de "
+        f"BQML_COST_MULTIPLIER): {dry_bytes / 1e9:.2f} GB escaneados -> ~${est_cost:.2f}. "
+        f"El numero real se loggea despues del CREATE MODEL."
     )
 
-    if not confirm(f"Confirmar CREATE MODEL fold {fold_id} (~${est_cost:.2f} estimado)?", auto_yes):
+    if not confirm(f"Confirmar CREATE MODEL fold {fold_id} (>=${est_cost:.2f} estimado minimo)?", auto_yes):
         logger.warning(f"  Fold {fold_id} SALTADO por el usuario.")
         return
 
