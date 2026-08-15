@@ -18,7 +18,23 @@ fija, $18.27), este script:
      30,490 completas -- ver INSTRUCCIONES.md, "Major scope decision":
      Fases 5-9 corren sobre la muestra para mantener el costo de BQML en
      ~$1.80/fold en vez de ~$18/fold.
-  3. Un modelo BQML distinto por fold (baseline_arima_cv_fold{N}) -- ARIMA_
+  3. Entrena contra una tabla PRE-FILTRADA a lgbm_sample
+     (sales_long_lgbm_sample, materializada una vez por ensure_source_table()),
+     no contra sales_long via JOIN en cada CREATE MODEL. Este es un fix
+     critico, no un detalle de estilo: un INNER JOIN contra lgbm_sample en
+     el WHERE de cada fold NO reduce los bytes escaneados -- BigQuery debe
+     leer la columna completa de sales_long para el rango de fechas (el
+     partition pruning por date si funciona) mas alla de que el JOIN
+     descarte casi todas las filas despues, porque ese filtro de series
+     vive en otra tabla, no en un WHERE literal que CLUSTER BY pueda usar
+     para podar bloques. Confirmado en la practica: el primer intento de
+     este script (JOIN directo) estimo ~$104 para un solo fold -- casi lo
+     mismo que si no se filtrara por muestra en absoluto. La tabla
+     pre-filtrada resuelve esto: al ya contener solo las ~3,000 series
+     (materializada con un CREATE TABLE AS SELECT de una sola vez, a la
+     tarifa NORMAL de BigQuery, no la de BQML), el filtro de fecha por fold
+     si poda correctamente sobre una tabla que ya es ~10x mas chica.
+  4. Un modelo BQML distinto por fold (baseline_arima_cv_fold{N}) -- ARIMA_
      PLUS no permite reentrenar "in place" con otra ventana bajo el mismo
      nombre sin perder el anterior, y conservarlos separados permite
      inspeccionar cualquier fold despues sin volver a entrenar.
@@ -35,7 +51,10 @@ se puede deshacer. Los bytes/costo REALES se loggean despues de cada job
 contra el estimado de ~$1.80/fold.
 
 Uso:
-    python -m src.models.bqml_arima_cv               # los 5 folds, con confirmacion
+    python -m src.models.bqml_arima_cv               # materializa la tabla
+                                                       # pre-filtrada (una vez,
+                                                       # con confirmacion) y
+                                                       # corre los 5 folds
     python -m src.models.bqml_arima_cv --fold 3        # un solo fold
     python -m src.models.bqml_arima_cv --yes           # sin confirmacion interactiva
 """
@@ -44,6 +63,7 @@ import argparse
 import logging
 
 import pandas as pd
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 
 from src.evaluation.cv_io import write_fold
@@ -57,9 +77,15 @@ DATASET = "m5_dataset"
 
 SALES_TABLE = f"{PROJECT}.{DATASET}.sales_long"
 LGBM_SAMPLE_TABLE = f"{PROJECT}.{DATASET}.lgbm_sample"
+SOURCE_TABLE = f"{PROJECT}.{DATASET}.sales_long_lgbm_sample"  # pre-filtrada, ver docstring
 SERIES_SEGMENTS_TABLE = f"{PROJECT}.{DATASET}.series_segments"
 PREDICTIONS_TABLE = f"{PROJECT}.{DATASET}.bqml_predictions_cv"
 METADATA_TABLE = f"{PROJECT}.{DATASET}.bqml_metadata_cv"
+
+# Tarifa NORMAL de queries (no la de BQML) -- se usa para estimar/loggear
+# el costo de materializar SOURCE_TABLE, que es un CREATE TABLE AS SELECT
+# comun, no un CREATE MODEL.
+STANDARD_RATE_USD_PER_TIB = 6.25
 
 AUTO_ARIMA_MAX_ORDER = 4  # igual que 4b -- multiplicador ~30x (vs ~42x default)
 HOLIDAY_REGION = "US"
@@ -85,9 +111,11 @@ def model_name(fold_id: int) -> str:
 
 def build_create_model_sql(fold_id: int) -> str:
     """
-    TRAIN acotado a [train_start, train_end] (365 dias, fold-especifico) e
-    INNER JOIN contra lgbm_sample -- las dos diferencias clave contra el
-    run de referencia de 4b (ver docstring del modulo).
+    TRAIN acotado a [train_start, train_end] (365 dias, fold-especifico)
+    sobre SOURCE_TABLE (ya pre-filtrada a lgbm_sample, ver docstring del
+    modulo) -- sin JOIN aca: el filtro de series ya esta resuelto de
+    antemano en la materializacion, asi que el partition pruning por date
+    funciona sobre una tabla que ya es ~10x mas chica.
     """
     return f"""
         CREATE OR REPLACE MODEL `{model_name(fold_id)}`
@@ -99,15 +127,9 @@ def build_create_model_sql(fold_id: int) -> str:
           holiday_region = '{HOLIDAY_REGION}',
           auto_arima_max_order = {AUTO_ARIMA_MAX_ORDER}
         ) AS
-        SELECT
-          s.item_id,
-          s.store_id,
-          s.date,
-          s.sales
-        FROM `{SALES_TABLE}` AS s
-        INNER JOIN `{LGBM_SAMPLE_TABLE}` AS sample
-          ON s.item_id = sample.item_id AND s.store_id = sample.store_id
-        WHERE s.date BETWEEN @train_start AND @train_end
+        SELECT item_id, store_id, date, sales
+        FROM `{SOURCE_TABLE}`
+        WHERE date BETWEEN @train_start AND @train_end
     """
 
 
@@ -264,13 +286,67 @@ def run_fold(client: bigquery.Client, fold: pd.Series, segments_df: pd.DataFrame
     write_fold(client, metadata_df, METADATA_TABLE, METADATA_SCHEMA, fold_id)
 
 
+def build_source_table_sql() -> str:
+    return f"""
+        CREATE OR REPLACE TABLE `{SOURCE_TABLE}`
+        PARTITION BY date
+        CLUSTER BY item_id, store_id
+        AS
+        SELECT s.item_id, s.store_id, s.date, s.sales
+        FROM `{SALES_TABLE}` AS s
+        INNER JOIN `{LGBM_SAMPLE_TABLE}` AS sample
+          ON s.item_id = sample.item_id AND s.store_id = sample.store_id
+    """
+
+
+def ensure_source_table(client: bigquery.Client, force: bool, auto_yes: bool) -> None:
+    """
+    Materializa SOURCE_TABLE una sola vez (o si --force-rebuild-source).
+    El JOIN va aca -- una unica vez, a la tarifa NORMAL de queries, no la
+    de BQML -- para que build_create_model_sql() en cada fold no tenga que
+    pagar ese JOIN 5 veces a $312.50/TiB (ver docstring del modulo, el
+    hallazgo de los ~$104 estimados para un solo fold con el diseño viejo).
+    """
+    if not force:
+        try:
+            table = client.get_table(SOURCE_TABLE)
+            logger.info(f"{SOURCE_TABLE} ya existe ({table.num_rows:,} filas) -- se reutiliza tal cual.")
+            return
+        except NotFound:
+            pass
+
+    job_config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
+    dry_job = client.query(build_source_table_sql(), job_config=job_config)
+    dry_bytes = dry_job.total_bytes_processed or 0
+    est_cost = (dry_bytes / (1024 ** 4)) * STANDARD_RATE_USD_PER_TIB
+    logger.info(
+        f"Materializando {SOURCE_TABLE}: {dry_bytes / 1e9:.2f} GB escaneados "
+        f"-> ~${est_cost:.2f} (tarifa normal, NO BQML -- esto es un CREATE "
+        f"TABLE AS SELECT comun, se paga UNA vez)"
+    )
+
+    if not confirm(f"Confirmar materializacion de {SOURCE_TABLE} (~${est_cost:.2f})?", auto_yes):
+        raise SystemExit("Materializacion de SOURCE_TABLE cancelada -- no se puede continuar sin ella.")
+
+    job = client.query(build_source_table_sql())
+    job.result()
+    real_cost = ((job.total_bytes_billed or 0) / (1024 ** 4)) * STANDARD_RATE_USD_PER_TIB
+    logger.info(f"  OK -- {(job.total_bytes_billed or 0) / 1e9:.2f} GB facturados (~${real_cost:.2f} real)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="BQML ARIMA_PLUS walk-forward CV (Fase 5).")
     parser.add_argument("--fold", type=int, default=None, help="Correr un solo fold_id (1-5)")
     parser.add_argument("--yes", action="store_true", help="Sin confirmacion interactiva por fold")
+    parser.add_argument(
+        "--force-rebuild-source", action="store_true",
+        help="Re-materializar sales_long_lgbm_sample aunque ya exista (p.ej. si lgbm_sample cambio)",
+    )
     args = parser.parse_args()
 
     client = get_bq_client()
+    ensure_source_table(client, args.force_rebuild_source, args.yes)
+
     folds_df = get_folds(client)
 
     segments_df = client.query(
