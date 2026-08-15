@@ -211,12 +211,15 @@ def cast_categoricals(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def train_models(train_df: pd.DataFrame) -> dict[str, lgb.Booster]:
+def train_models(train_df: pd.DataFrame, model_dir: str = MODEL_DIR) -> dict[str, lgb.Booster]:
+    """model_dir parametrizable: lgbm_cv.py (Fase 5) entrena un set de 5
+    modelos (uno por percentil) POR FOLD -- sin esto, cada fold pisaria los
+    .txt del anterior bajo el mismo MODEL_DIR."""
     feature_cols = [c for c in train_df.columns if c not in EXCLUDE_COLS]
     X_train = train_df[feature_cols]
     y_train = train_df[TARGET_COL]
 
-    os.makedirs(MODEL_DIR, exist_ok=True)
+    os.makedirs(model_dir, exist_ok=True)
 
     # Un solo Dataset, construido una vez y reutilizado para los 5
     # lgb.train() (alpha es el unico param que cambia entre quantiles, no
@@ -236,7 +239,7 @@ def train_models(train_df: pd.DataFrame) -> dict[str, lgb.Booster]:
         logger.info(f"Entrenando modelo {q_name} (alpha={alpha})...")
         booster = lgb.train(params, train_set)
 
-        model_path = os.path.join(MODEL_DIR, f"lgbm_{q_name}.txt")
+        model_path = os.path.join(model_dir, f"lgbm_{q_name}.txt")
         booster.save_model(model_path)
         logger.info(f"  -> guardado en {model_path}")
 
