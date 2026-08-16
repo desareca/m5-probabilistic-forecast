@@ -165,12 +165,11 @@ def print_comparison(client) -> None:
     logger.info("\n%s", pivot_fair.to_string())
 
     logger.info("=== BQML vs LightGBM, scope completo (~3,000 series de lgbm_sample) ===")
-    full_scope = (
-        df.groupby(["model", "quantile_name"])
-        .apply(lambda g: (g["avg_pinball_loss"] * g["n_obs"]).sum() / g["n_obs"].sum())
-        .rename("avg_pinball_loss")
-        .reset_index()
+    df["weighted"] = df["avg_pinball_loss"] * df["n_obs"]
+    full_scope = df.groupby(["model", "quantile_name"], as_index=False).agg(
+        weighted_sum=("weighted", "sum"), n_obs_sum=("n_obs", "sum")
     )
+    full_scope["avg_pinball_loss"] = full_scope["weighted_sum"] / full_scope["n_obs_sum"]
     pivot_full = full_scope[full_scope["model"].isin(["bqml", "lgbm"])].pivot(
         index="quantile_name", columns="model", values="avg_pinball_loss"
     )
