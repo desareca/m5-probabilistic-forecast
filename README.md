@@ -49,9 +49,9 @@ decisiones de diseño y su justificación, en [`INSTRUCCIONES.md`](INSTRUCCIONES
 | 1b. Workstation efímera | ✅ Completa | [`phase-summaries/01b-workstation-efimera.md`](phase-summaries/01b-workstation-efimera.md) |
 | 2. Datos + EDA | ✅ Completa | [`phase-summaries/02-datos-eda.md`](phase-summaries/02-datos-eda.md) |
 | 3. Feature Engineering | ✅ Completa | [`phase-summaries/03-feature-engineering.md`](phase-summaries/03-feature-engineering.md) |
-| 4. Modelos | 🔄 En progreso | 4a (ARIMA clásico) con código listo, ejecución pendiente. 4b (BQML ARIMA_PLUS) y 4c (LightGBM) diseñados en `INSTRUCCIONES.md`, código pendiente |
-| 5. Validación (walk-forward CV) | ⏳ Pendiente | Diseño de esquema temporal ya definido (`window_size=365`) |
-| 6. Evaluación | ⏳ Pendiente | Estructura de comparación (Tabla A/B) ya definida |
+| 4. Modelos | ✅ Completa | [`phase-summaries/04-modelos.md`](phase-summaries/04-modelos.md) — ARIMA clásico, BQML ARIMA_PLUS, LightGBM Cuantil |
+| 5. Validación (walk-forward CV) | ✅ Completa | [`phase-summaries/05-walk-forward-cv.md`](phase-summaries/05-walk-forward-cv.md) — 5 folds × 3 modelos |
+| 6. Evaluación | 🔄 En progreso | Comparación cuantitativa por percentil ya lista (ver Resultados abajo); falta desglose narrativo por categoría y casos difíciles, notebook `02_evaluation.ipynb` |
 | 7. MLOps | ⏳ Pendiente | |
 | 8. Tablas agregadas | ⏳ Pendiente | |
 | 9. Dashboard Looker Studio | ⏳ Pendiente | |
@@ -69,6 +69,43 @@ decisiones de diseño y su justificación, en [`INSTRUCCIONES.md`](INSTRUCCIONES
   (`is_christmas`, tipo de evento propio `Store_Closure`), no como un evento genérico más.
 - Coeficiente de variación de precios real: **62–91%** según categoría, más alto de lo
   asumido inicialmente.
+
+## Resultados — comparación de modelos (walk-forward CV, 5 folds)
+
+Pinball Loss promedio por percentil, sobre 5 folds espaciados (`window_size=365`, horizonte
+28 días). Detalle completo en
+[`phase-summaries/05-walk-forward-cv.md`](phase-summaries/05-walk-forward-cv.md).
+
+**Comparación directa — 32 series presentes en los 3 modelos:**
+
+| Percentil | ARIMA | BQML ARIMA_PLUS | LightGBM Cuantil |
+|---|---|---|---|
+| P05 | 0.221 | 0.227 | **0.182** |
+| P25 | 0.940 | 0.797 | **0.621** |
+| P50 | 1.319 | 1.150 | **0.874** |
+| P75 | 1.180 | 1.065 | **0.801** |
+| P95 | 0.456 | 0.496 | **0.361** |
+
+**BQML vs. LightGBM — escala completa (~3,000 series de `lgbm_sample`):**
+
+| Percentil | BQML ARIMA_PLUS | LightGBM Cuantil |
+|---|---|---|
+| P05 | 0.093 | **0.058** |
+| P50 | 0.459 | **0.379** |
+| P95 | 0.274 | **0.169** |
+
+**LightGBM Cuantil gana en los 5 percentiles, en ambos alcances.** Un detalle relevante para
+la narrativa técnica: BQML supera a ARIMA clásico en el cuerpo de la distribución (P25–P75)
+pero pierde en las colas (P05/P95) — coherente con que `ARIMA_PLUS` deriva sus intervalos
+asumiendo normalidad, mientras que LightGBM Cuantil optimiza cada percentil de forma
+independiente y maneja mejor los extremos.
+
+Dos bugs de diseño reales, encontrados y corregidos durante la validación (documentados en
+detalle en el resumen de Fase 5): un `JOIN` en BigQuery que no podaba por partición y hacía
+que el costo estimado de BQML fuera ~300x el real ($104 estimado vs. $0.34 real por fold), y
+7 series de BQML con `standard_error` explosivo que distorsionaban el promedio agregado hasta
+que se marcaron y excluyeron explícitamente (mismo principio de "sin fallback silencioso" que
+las 22 series `NaN` de Fase 4b).
 
 ## Cómo trabajar en el proyecto
 
@@ -112,9 +149,19 @@ m5-probabilistic-forecast/
 ├── src/
 │   ├── data/                   # Carga GCS → BigQuery
 │   ├── features/                # Fourier + features SQL (Fase 3)
-│   ├── models/                  # ARIMA, BQML, LightGBM (Fase 4)
-│   └── evaluation/               # Pinball Loss + comparativas (Fase 6)
-├── sql/                          # Queries de construcción de tablas BigQuery
+│   ├── models/                  # Fase 4 (smoke test) + Fase 5 (walk-forward CV)
+│   │   ├── arima_baseline.py     #   ARIMA clásico, 1 fold (4a)
+│   │   ├── arima_cv.py           #   ARIMA clásico, 5 folds (5)
+│   │   ├── bqml_arima_cv.py      #   BQML ARIMA_PLUS, 5 folds, acotado a lgbm_sample (5)
+│   │   └── lgbm_quantile.py      #   LightGBM Cuantil, 1 fold (4c)
+│   │   └── lgbm_cv.py            #   LightGBM Cuantil, 5 folds (5)
+│   └── evaluation/               # Walk-forward CV + Pinball Loss (Fase 5-6)
+│       ├── folds.py                #   Genera los 5 folds dinámicamente
+│       ├── cv_io.py                #   Escritura idempotente por fold_id
+│       ├── metrics.py              #   Fórmula de Pinball Loss
+│       ├── build_cv_metrics.py     #   Consolida métricas en BigQuery
+│       └── diagnose_bqml_outliers.py # Diagnóstico de series inestables
+├── sql/                          # Queries de referencia (reshape, muestras, 4b full-scale)
 ├── pipelines/                     # Vertex AI Pipelines / KFP (Fase 7)
 ├── terraform/                     # Infraestructura como código
 ├── scripts/
@@ -132,6 +179,19 @@ cuenta GCP nueva → costo efectivo $0). Desglose completo, incluida la mecánic
 BQML ARIMA_PLUS (que no cobra a la tarifa estándar de BigQuery), en
 [`INSTRUCCIONES.md`](INSTRUCCIONES.md#costos-estimados).
 
+**Costos reales incurridos hasta ahora:**
+
+| Componente | Costo real |
+|---|---|
+| BQML ARIMA_PLUS, referencia full-scale (Fase 4b, 30,490 series) | $18.27 |
+| BQML ARIMA_PLUS, walk-forward CV (Fase 5, 5 folds × ~3,000 series) | $1.70 (5 × $0.34) |
+| Materialización de tabla pre-filtrada para CV (una vez) | ~$0.37 |
+| ARIMA clásico + LightGBM Cuantil (Fases 4/5) | $0 (compute local en la Workstation) |
+
+El hallazgo del bug de `JOIN` sin pruning (ver Resultados arriba) es la diferencia entre este
+número real y lo que hubiera costado sin corregirlo: ~$104/fold × 5 folds ≈ $520 solo en
+walk-forward CV.
+
 ## Decisiones de diseño destacadas
 
 - **Pinball Loss como métrica principal** (no RMSE) — penaliza asimétricamente, coherente con
@@ -139,8 +199,11 @@ BQML ARIMA_PLUS (que no cobra a la tarifa estándar de BigQuery), en
 - **Walk-forward CV, no K-Fold** — obligatorio para series temporales, evita leakage.
 - **Test set físicamente bloqueado** — los últimos 28 días viven en un archivo separado
   (`sales_train_evaluation.csv`) que no se carga a BigQuery hasta la evaluación final (Fase 6).
-- **Comparación de modelos en dos alcances** (Tabla A: 32 series / los 3 modelos; Tabla B:
-  30,490 series / 2 modelos) — evita comparar poblaciones distintas bajo una sola tabla.
+- **Comparación de modelos en dos alcances** (32 series / los 3 modelos; ~3,000 series de
+  `lgbm_sample` / BQML vs. LightGBM) — evita comparar poblaciones distintas bajo una sola
+  tabla. BQML corre sobre la muestra desde Fase 5 en adelante, no sobre las 30,490 completas
+  (que sí se usaron en el run de referencia de Fase 4b) — decisión de costo/tiempo documentada
+  en `INSTRUCCIONES.md`.
 - Más decisiones y su razonamiento completo en `INSTRUCCIONES.md`.
 
 ## Autor
