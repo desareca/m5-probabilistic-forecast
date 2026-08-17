@@ -170,9 +170,9 @@ def run_ddl(client, sql: str, label: str) -> None:
 def _weighted_pivot(df, index_col: str, index_order: list[str] | None = None):
     """
     Colapsa filas duplicadas de (index_col, model) -- ocurren porque las
-    tablas by_* traen in_arima_sample como columna separada (bqml/lgbm
-    aparecen una vez por cada valor True/False) -- con promedio ponderado
-    por n_obs, no un pivot ingenuo que rompe con indices duplicados.
+    tablas by_* traen in_arima_sample como columna separada -- con promedio
+    ponderado por n_obs, no un pivot ingenuo que rompe con indices
+    duplicados.
     """
     weighted = df.assign(weighted=df["avg_pinball_loss"] * df["n_obs"])
     agg = weighted.groupby([index_col, "model"], as_index=False).agg(
@@ -185,47 +185,50 @@ def _weighted_pivot(df, index_col: str, index_order: list[str] | None = None):
     return pivot[[m for m in ["arima", "bqml", "lgbm"] if m in pivot.columns]]
 
 
-def print_by_product_category(client) -> None:
-    df = client.query(
-        f"SELECT * FROM `{BY_PRODUCT_CATEGORY_TABLE}` WHERE quantile_name = 'p50'"
-    ).to_dataframe()
-    logger.info("=== Pinball Loss (P50) por categoria real (todo lgbm_sample) ===")
-    logger.info("\n%s", _weighted_pivot(df, "category").to_string())
+def print_fair_and_full(client, table: str, index_col: str, index_order: list[str], label: str) -> None:
+    """
+    Mismo principio de dos alcances que print_comparison() en
+    build_cv_metrics.py -- indispensable aca tambien: arima SOLO tiene
+    predicciones para las 32 series de arima_sample, mientras que bqml/lgbm
+    en estas tablas agregan sobre las ~3,000 de lgbm_sample completo. Sin
+    este split, comparar la fila 'arima' contra 'bqml'/'lgbm' mezcla
+    poblaciones distintas -- el bug real detras del resultado contraintuitivo
+    de HOBBIES en la primera corrida (arima "ganando" solo por comparar
+    contra un promedio de una poblacion 100x mas grande).
+    """
+    df = client.query(f"SELECT * FROM `{table}` WHERE quantile_name = 'p50'").to_dataframe()
+
+    logger.info(f"=== {label} -- comparacion justa (32 series arima_sample, 3 modelos) ===")
+    fair = df[df["in_arima_sample"]]
+    logger.info("\n%s", _weighted_pivot(fair, index_col, index_order).to_string())
+
+    logger.info(f"=== {label} -- BQML vs LightGBM, scope completo (~3,000 series lgbm_sample) ===")
+    full = df[df["model"].isin(["bqml", "lgbm"])]
+    logger.info("\n%s", _weighted_pivot(full, index_col, index_order).to_string())
+    logger.info(
+        "n_obs por bucket (scope completo):\n%s",
+        full.groupby(index_col)["n_obs"].sum().reindex(index_order).to_string(),
+    )
 
 
-
-def print_by_release_age(client) -> None:
-    df = client.query(
-        f"SELECT * FROM `{BY_RELEASE_AGE_TABLE}` WHERE quantile_name = 'p50'"
-    ).to_dataframe()
-    bucket_order = ["nuevo_lt_90d", "establecido", "antes_de_release", "sin_release_date"]
-    logger.info("=== Pinball Loss (P50) por antiguedad de release ===")
-    logger.info("\n%s", _weighted_pivot(df, "release_age_bucket", bucket_order).to_string())
-    logger.info("n_obs por bucket:\n%s", df.groupby("release_age_bucket")["n_obs"].sum().to_string())
-
-
-def print_by_event(client) -> None:
-    df = client.query(
-        f"SELECT * FROM `{BY_EVENT_TABLE}` WHERE quantile_name = 'p50'"
-    ).to_dataframe()
-    bucket_order = ["navidad", "evento", "sin_evento"]
-    logger.info("=== Pinball Loss (P50) por tipo de dia (evento/navidad/normal) ===")
-    logger.info("\n%s", _weighted_pivot(df, "event_bucket", bucket_order).to_string())
-    logger.info("n_obs por bucket:\n%s", df.groupby("event_bucket")["n_obs"].sum().to_string())
 
 
 def main() -> None:
     client = get_bq_client()
 
+    CATEGORY_ORDER = ["FOODS", "HOBBIES", "HOUSEHOLD"]
+    AGE_ORDER = ["nuevo_lt_90d", "establecido", "antes_de_release", "sin_release_date"]
+    EVENT_ORDER = ["navidad", "evento", "sin_evento"]
+
     run_ddl(client, build_by_product_category_sql(), "cv_metrics_by_product_category")
-    print_by_product_category(client)
+    print_fair_and_full(client, BY_PRODUCT_CATEGORY_TABLE, "category", CATEGORY_ORDER, "Categoria real")
 
     run_ddl(client, build_release_dates_sql(), "series_release_dates")
     run_ddl(client, build_by_release_age_sql(), "cv_metrics_by_release_age")
-    print_by_release_age(client)
+    print_fair_and_full(client, BY_RELEASE_AGE_TABLE, "release_age_bucket", AGE_ORDER, "Antiguedad de release")
 
     run_ddl(client, build_by_event_sql(), "cv_metrics_by_event")
-    print_by_event(client)
+    print_fair_and_full(client, BY_EVENT_TABLE, "event_bucket", EVENT_ORDER, "Tipo de dia")
 
     logger.info("Analisis de casos dificiles completo.")
 
