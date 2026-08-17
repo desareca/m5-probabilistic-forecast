@@ -167,38 +167,50 @@ def run_ddl(client, sql: str, label: str) -> None:
     logger.info(f"{label}: OK -- {gb:.3f} GB facturados (~${cost:.4f})")
 
 
+def _weighted_pivot(df, index_col: str, index_order: list[str] | None = None):
+    """
+    Colapsa filas duplicadas de (index_col, model) -- ocurren porque las
+    tablas by_* traen in_arima_sample como columna separada (bqml/lgbm
+    aparecen una vez por cada valor True/False) -- con promedio ponderado
+    por n_obs, no un pivot ingenuo que rompe con indices duplicados.
+    """
+    weighted = df.assign(weighted=df["avg_pinball_loss"] * df["n_obs"])
+    agg = weighted.groupby([index_col, "model"], as_index=False).agg(
+        weighted_sum=("weighted", "sum"), n_obs_sum=("n_obs", "sum")
+    )
+    agg["avg_pinball_loss"] = agg["weighted_sum"] / agg["n_obs_sum"]
+    pivot = agg.pivot(index=index_col, columns="model", values="avg_pinball_loss")
+    if index_order is not None:
+        pivot = pivot.reindex([b for b in index_order if b in pivot.index])
+    return pivot[[m for m in ["arima", "bqml", "lgbm"] if m in pivot.columns]]
+
+
 def print_by_product_category(client) -> None:
     df = client.query(
-        f"SELECT * FROM `{BY_PRODUCT_CATEGORY_TABLE}` WHERE quantile_name = 'p50' "
-        f"ORDER BY category, model"
+        f"SELECT * FROM `{BY_PRODUCT_CATEGORY_TABLE}` WHERE quantile_name = 'p50'"
     ).to_dataframe()
     logger.info("=== Pinball Loss (P50) por categoria real (todo lgbm_sample) ===")
-    logger.info("\n%s", df.pivot(index="category", columns="model", values="avg_pinball_loss").to_string())
+    logger.info("\n%s", _weighted_pivot(df, "category").to_string())
+
 
 
 def print_by_release_age(client) -> None:
     df = client.query(
-        f"SELECT * FROM `{BY_RELEASE_AGE_TABLE}` WHERE quantile_name = 'p50' "
-        f"ORDER BY release_age_bucket, model"
+        f"SELECT * FROM `{BY_RELEASE_AGE_TABLE}` WHERE quantile_name = 'p50'"
     ).to_dataframe()
+    bucket_order = ["nuevo_lt_90d", "establecido", "antes_de_release", "sin_release_date"]
     logger.info("=== Pinball Loss (P50) por antiguedad de release ===")
-    logger.info(
-        "\n%s",
-        df.pivot(index="release_age_bucket", columns="model", values="avg_pinball_loss").to_string(),
-    )
+    logger.info("\n%s", _weighted_pivot(df, "release_age_bucket", bucket_order).to_string())
     logger.info("n_obs por bucket:\n%s", df.groupby("release_age_bucket")["n_obs"].sum().to_string())
 
 
 def print_by_event(client) -> None:
     df = client.query(
-        f"SELECT * FROM `{BY_EVENT_TABLE}` WHERE quantile_name = 'p50' "
-        f"ORDER BY event_bucket, model"
+        f"SELECT * FROM `{BY_EVENT_TABLE}` WHERE quantile_name = 'p50'"
     ).to_dataframe()
+    bucket_order = ["navidad", "evento", "sin_evento"]
     logger.info("=== Pinball Loss (P50) por tipo de dia (evento/navidad/normal) ===")
-    logger.info(
-        "\n%s",
-        df.pivot(index="event_bucket", columns="model", values="avg_pinball_loss").to_string(),
-    )
+    logger.info("\n%s", _weighted_pivot(df, "event_bucket", bucket_order).to_string())
     logger.info("n_obs por bucket:\n%s", df.groupby("event_bucket")["n_obs"].sum().to_string())
 
 
