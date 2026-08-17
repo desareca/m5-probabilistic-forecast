@@ -3,10 +3,18 @@ Analisis de casos dificiles -- Fase 6 (INSTRUCCIONES.md pide explicitamente:
 series con >50% ceros, productos nuevos sin historia, semanas con eventos
 especiales -- ademas de Pinball Loss por categoria FOODS/HOBBIES/HOUSEHOLD).
 
-"Series con >50% ceros" ya esta resuelto por cv_metrics_by_category
-(categoria_zero_rate: lento/muy_lento, Fase 5) -- no se repite aca. Este
-script cubre los 3 desgloses que faltaban, todos construidos sobre
-cv_pinball_loss (build_cv_metrics.py, Fase 6) sin tocar esa tabla:
+Todos los desgloses se imprimen con el mismo split de dos alcances que usa
+print_comparison() en build_cv_metrics.py (ver print_fair_and_full mas abajo)
+-- indispensable siempre que arima aparezca en la comparacion, porque arima
+SOLO tiene predicciones para las 32 series de arima_sample mientras que
+bqml/lgbm cubren las ~3,000 de lgbm_sample completo. La primera version de
+este script no hacia el split y eso produjo un resultado contraintuitivo
+(arima "ganando" en HOBBIES) que en realidad era solo un artefacto de
+comparar poblaciones distintas -- documentado como leccion en
+phase-summaries/06-evaluacion.md.
+
+Tablas construidas por este script (sobre cv_pinball_loss,
+build_cv_metrics.py, sin tocar esa tabla):
 
   1. cv_metrics_by_product_category -- Pinball Loss x categoria real
      (FOODS/HOBBIES/HOUSEHOLD, via series_segments.category, Fase 4).
@@ -20,6 +28,11 @@ cv_pinball_loss (build_cv_metrics.py, Fase 6) sin tocar esa tabla:
      (is_event, reutilizando la misma logica de features_train.sql) vs. sin
      evento, con Navidad separada aparte (cierre de tienda, caso extremo
      documentado en el EDA).
+
+Tabla reusada sin reconstruir:
+  4. cv_metrics_by_category (categoria_zero_rate) -- ya construida en Fase 5
+     (build_cv_metrics.py), aca solo se imprime con el split de dos alcances
+     que faltaba.
 
 Todos excluyen bqml_unstable_series, mismo criterio que build_cv_metrics.py.
 
@@ -46,6 +59,7 @@ RELEASE_DATES_TABLE = f"{PROJECT}.{DATASET}.series_release_dates"
 BY_PRODUCT_CATEGORY_TABLE = f"{PROJECT}.{DATASET}.cv_metrics_by_product_category"
 BY_RELEASE_AGE_TABLE = f"{PROJECT}.{DATASET}.cv_metrics_by_release_age"
 BY_EVENT_TABLE = f"{PROJECT}.{DATASET}.cv_metrics_by_event"
+BY_ZERO_RATE_TABLE = f"{PROJECT}.{DATASET}.cv_metrics_by_category"  # ya existe, Fase 5
 
 # Umbral "producto nuevo": dentro de los primeros 90 dias desde su release.
 # Coincide con el horizonte de 28 dias x ~3 folds tempranos -- suficiente
@@ -219,6 +233,7 @@ def main() -> None:
     CATEGORY_ORDER = ["FOODS", "HOBBIES", "HOUSEHOLD"]
     AGE_ORDER = ["nuevo_lt_90d", "establecido", "antes_de_release", "sin_release_date"]
     EVENT_ORDER = ["navidad", "evento", "sin_evento"]
+    ZERO_ORDER = ["rapido", "medio", "lento", "muy_lento"]
 
     run_ddl(client, build_by_product_category_sql(), "cv_metrics_by_product_category")
     print_fair_and_full(client, BY_PRODUCT_CATEGORY_TABLE, "category", CATEGORY_ORDER, "Categoria real")
@@ -229,6 +244,11 @@ def main() -> None:
 
     run_ddl(client, build_by_event_sql(), "cv_metrics_by_event")
     print_fair_and_full(client, BY_EVENT_TABLE, "event_bucket", EVENT_ORDER, "Tipo de dia")
+
+    # cv_metrics_by_category ya existe desde Fase 5 (categoria_zero_rate) --
+    # no se reconstruye, solo se imprime con el split justo/completo que
+    # faltaba (ver docstring del modulo, punto no repetido en la Fase 5).
+    print_fair_and_full(client, BY_ZERO_RATE_TABLE, "categoria_zero_rate", ZERO_ORDER, "Tasa de ceros")
 
     logger.info("Analisis de casos dificiles completo.")
 
