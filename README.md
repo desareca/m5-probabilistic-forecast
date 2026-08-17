@@ -1,7 +1,7 @@
 # M5 Probabilistic Forecasting
 
 Pipeline end-to-end de **forecasting probabilístico** sobre el dataset M5 (Walmart, Kaggle),
-construido en GCP como proyecto de portfolio de Machine Learning Engineering. Predice
+construido en GCP como proyecto de Machine Learning Engineering. Predice
 distribuciones de venta futura (percentiles P5/P25/P50/P75/P95) para 30,490 series
 item×tienda, comparando tres niveles de sofisticación de modelo: ARIMA clásico, BigQuery ML
 ARIMA_PLUS, y LightGBM Cuantil.
@@ -51,7 +51,7 @@ decisiones de diseño y su justificación, en [`INSTRUCCIONES.md`](INSTRUCCIONES
 | 3. Feature Engineering | ✅ Completa | [`phase-summaries/03-feature-engineering.md`](phase-summaries/03-feature-engineering.md) |
 | 4. Modelos | ✅ Completa | [`phase-summaries/04-modelos.md`](phase-summaries/04-modelos.md) — ARIMA clásico, BQML ARIMA_PLUS, LightGBM Cuantil |
 | 5. Validación (walk-forward CV) | ✅ Completa | [`phase-summaries/05-walk-forward-cv.md`](phase-summaries/05-walk-forward-cv.md) — 5 folds × 3 modelos |
-| 6. Evaluación | 🔄 En progreso | Comparación cuantitativa por percentil lista (ver Resultados abajo). Código de casos difíciles y categoría real (`build_case_analysis.py`) y notebook `02_evaluation.ipynb` ya escritos — pendiente correr en la Workstation y completar la narrativa con los resultados |
+| 6. Evaluación | ✅ Completa | [`phase-summaries/06-evaluacion.md`](phase-summaries/06-evaluacion.md) — LightGBM gana en todos los segmentos analizados; hallazgo de diseño: el CV nunca valida Navidad |
 | 7. MLOps | ⏳ Pendiente | |
 | 8. Tablas agregadas | ⏳ Pendiente | |
 | 9. Dashboard Looker Studio | ⏳ Pendiente | |

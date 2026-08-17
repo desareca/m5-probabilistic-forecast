@@ -396,8 +396,8 @@ cubren exactamente TRAIN + CV + VAL. Los 28 días de TEST son la diferencia con
   cortes de fecha, mismo `window_size`) se generan una sola vez y se aplican
   consistentemente. **BQML ARIMA_PLUS y LightGBM corren cada fold sobre `m5_dataset.lgbm_sample`
   (~3,000 series, muestra proporcional)**, no las 30,490 completas — decisión de alcance
-  para todo el proyecto de acá en adelante (Fases 5–9): dado que es un proyecto de
-  portfolio, entrenar/servir/visualizar a escala completa no aporta valor adicional
+  para todo el proyecto de acá en adelante (Fases 5–9): dado que es un proyecto personal, 
+  entrenar/servir/visualizar a escala completa no aporta valor adicional
   proporcional al tiempo y costo que agrega (BQML: ~$18/fold × 5 folds ≈ $90 a escala
   completa vs ~$9 al 10%; LightGBM ya estaba forzado a esta escala por memoria/tiempo,
   ver Fase 4c). El entrenamiento de BQML a escala completa de Fase 4b (ya pagado, $18.27)
@@ -475,7 +475,7 @@ Ambas tablas, desglosadas por:
 **⚠️ Alcance:** el pipeline entrena/reentrena sobre `m5_dataset.lgbm_sample` (~3,000 series),
 no las 30,490 completas — misma decisión de Fase 5, consistente con todo lo evaluado en
 Fase 6. Evita inflar el costo y tiempo de cada corrida del pipeline sin aportar valor
-adicional para un proyecto de portfolio.
+adicional para este proyecto.
 
 **Tareas:**
 1. Empaquetar training en Docker y subir a Artifact Registry
@@ -499,8 +499,7 @@ adicional para un proyecto de portfolio.
 
 **⚠️ Alcance:** las tablas agregadas cubren solo las series de `lgbm_sample` (~3,000,
 ~10% del catálogo) — no todo M5. Debe quedar explícito en el propio dashboard (Fase 9),
-no como limitación oculta: es una decisión de diseño consciente para un proyecto de
-portfolio, no una limitación técnica.
+no como limitación oculta: es una decisión de diseño consciente para uneste proyecto, no una limitación técnica.
 
 **Tablas a crear (post batch prediction):**
 
