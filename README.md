@@ -51,7 +51,7 @@ decisiones de diseño y su justificación, en [`INSTRUCCIONES.md`](INSTRUCCIONES
 | 3. Feature Engineering | ✅ Completa | [`phase-summaries/03-feature-engineering.md`](phase-summaries/03-feature-engineering.md) |
 | 4. Modelos | ✅ Completa | [`phase-summaries/04-modelos.md`](phase-summaries/04-modelos.md) — ARIMA clásico, BQML ARIMA_PLUS, LightGBM Cuantil |
 | 5. Validación (walk-forward CV) | ✅ Completa | [`phase-summaries/05-walk-forward-cv.md`](phase-summaries/05-walk-forward-cv.md) — 5 folds × 3 modelos |
-| 6. Evaluación | 🔄 En progreso | Comparación cuantitativa por percentil ya lista (ver Resultados abajo); falta desglose narrativo por categoría y casos difíciles, notebook `02_evaluation.ipynb` |
+| 6. Evaluación | 🔄 En progreso | Comparación cuantitativa por percentil lista (ver Resultados abajo). Código de casos difíciles y categoría real (`build_case_analysis.py`) y notebook `02_evaluation.ipynb` ya escritos — pendiente correr en la Workstation y completar la narrativa con los resultados |
 | 7. MLOps | ⏳ Pendiente | |
 | 8. Tablas agregadas | ⏳ Pendiente | |
 | 9. Dashboard Looker Studio | ⏳ Pendiente | |
@@ -145,7 +145,7 @@ pip install -r requirements.txt
 m5-probabilistic-forecast/
 ├── notebooks/
 │   ├── 01_eda.ipynb            # EDA completo (Fase 2)
-│   └── 02_evaluation.ipynb     # Comparativa de modelos (Fase 6, pendiente)
+│   └── 02_evaluation.ipynb     # Comparativa de modelos + casos difíciles (Fase 6, código listo — pendiente correr)
 ├── src/
 │   ├── data/                   # Carga GCS → BigQuery
 │   ├── features/                # Fourier + features SQL (Fase 3)
@@ -160,7 +160,8 @@ m5-probabilistic-forecast/
 │       ├── cv_io.py                #   Escritura idempotente por fold_id
 │       ├── metrics.py              #   Fórmula de Pinball Loss
 │       ├── build_cv_metrics.py     #   Consolida métricas en BigQuery
-│       └── diagnose_bqml_outliers.py # Diagnóstico de series inestables
+│       ├── diagnose_bqml_outliers.py # Diagnóstico de series inestables
+│       └── build_case_analysis.py  #   Categoría real + productos nuevos + eventos (Fase 6)
 ├── sql/                          # Queries de referencia (reshape, muestras, 4b full-scale)
 ├── pipelines/                     # Vertex AI Pipelines / KFP (Fase 7)
 ├── terraform/                     # Infraestructura como código
