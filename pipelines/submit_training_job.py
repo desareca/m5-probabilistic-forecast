@@ -42,9 +42,10 @@ logger = logging.getLogger(__name__)
 PROJECT = "mle-m5-forecast"
 REGION = "us-central1"
 BUCKET = "mle-m5-forecast-m5-bucket"
-# v2: fix del ModuleNotFoundError de pmdarima/statsmodels (ver src/common.py) --
-# v1 nunca completo un CustomJob exitoso, no hace falta mantenerla.
-IMAGE_URI = f"{REGION}-docker.pkg.dev/{PROJECT}/m5-training/lgbm-quantile:v2"
+# v3: fix del ENTRYPOINT (ModuleNotFoundError: No module named 'src' --
+# invocar como script suelto no ponia /app en sys.path, ver Dockerfile).
+# v2 tuvo el mismo problema que v1 (nunca corrio bien), no hace falta mantenerla.
+IMAGE_URI = f"{REGION}-docker.pkg.dev/{PROJECT}/m5-training/lgbm-quantile:v3"
 
 MACHINE_TYPE = "n1-standard-8"  # ver skill-vertex-ai.md: CPU basta, buen balance para el tamano del M5.
 
