@@ -12,10 +12,14 @@ COPY requirements-training.txt .
 RUN pip install --no-cache-dir -r requirements-training.txt
 
 # Solo el codigo que pipelines/training_job.py importa en runtime --
-# src/evaluation/metrics.py y src/models/lgbm_quantile.py (que a su vez
-# importa src/models/arima_baseline.py por las constantes PROJECT/DATASET/
-# QUANTILE_LEVELS/get_bq_client/write_to_bigquery/fetch_date_window).
+# src/common.py, src/evaluation/metrics.py y src/models/lgbm_quantile.py
+# (que importa de src/common.py, no de src/models/arima_baseline.py --
+# ver src/common.py para el porque de esa separacion).
 COPY src/ src/
 COPY pipelines/training_job.py pipelines/training_job.py
 
-ENTRYPOINT ["python", "pipelines/training_job.py"]
+# "python -m pipelines.training_job", no "python pipelines/training_job.py":
+# invocar como script suelto solo agrega /app/pipelines a sys.path, no /app
+# -- rompe el import de src/ (ModuleNotFoundError: No module named 'src').
+# Con -m, /app (el WORKDIR, via cwd) queda en el path y src/ se resuelve bien.
+ENTRYPOINT ["python", "-m", "pipelines.training_job"]
