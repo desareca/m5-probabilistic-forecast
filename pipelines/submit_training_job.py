@@ -27,6 +27,7 @@ Uso (requiere venv con requirements.txt completo, no requirements-training.txt
     python -m pipelines.submit_training_job
 """
 
+import argparse
 import json
 import logging
 import re
@@ -121,16 +122,23 @@ def register_model(model_gcs_dir: str, metrics_raw: dict, run_id: str) -> aiplat
     percentil para comparar versiones desde la consola sin codigo (ver
     skill-vertex-ai.md).
 
-    Sin serving_container_image_uri: no existe container prebuilt de
-    Vertex AI para LightGBM y este modelo no se sirve via endpoint online
-    (Fase 7 usa batch prediction -- ver skill-vertex-ai.md, "Batch
-    prediction sobre online serving para portfolio"). Si el SDK de
-    aiplatform instalado exige este parametro para Model.upload(), fallara
-    aca con un error explicito de validacion -- avisar para resolverlo
-    (posible fix: apuntar serving_container_image_uri a la MISMA imagen de
-    training, aunque no implemente el contrato HTTP de prediccion de
-    Vertex AI, solo para satisfacer el campo obligatorio sin intencion de
-    desplegarla).
+    Confirmado en la corrida real: el SDK de aiplatform SI exige
+    serving_container_image_uri para Model.upload() (ValueError explicito,
+    "required if no local_model is provided") -- no existe la opcion de
+    registro "solo artefacto" que se esperaba. Fix: apuntarlo a la MISMA
+    imagen de training (IMAGE_URI). Esto satisface el campo obligatorio
+    pero NO la vuelve deployable de verdad -- el container de la Tarea 1
+    solo implementa el ENTRYPOINT de entrenamiento (pipelines/training_job.py
+    con argparse), no el contrato HTTP de prediccion de Vertex AI (rutas
+    /predict y /health que un servidor real como Flask/FastAPI expondria).
+    Sirve para Model Registry (versionado + labels de metricas, el
+    entregable real de esta tarea) pero CUALQUIER intento de desplegar un
+    endpoint o correr un Batch Prediction Job nativo de Vertex AI sobre
+    este Model fallara. La Tarea 4 (batch prediction) necesitara su propio
+    enfoque -- probablemente un script custom que cargue los .txt de
+    LightGBM directo desde GCS y prediga sobre BigQuery, no el mecanismo
+    nativo de Vertex AI Batch Prediction Job (que si requeriria un serving
+    container funcional). Queda marcado para resolver en esa tarea.
     """
     aiplatform.init(project=PROJECT, location=REGION)
 
@@ -141,6 +149,7 @@ def register_model(model_gcs_dir: str, metrics_raw: dict, run_id: str) -> aiplat
     model = aiplatform.Model.upload(
         display_name=f"lgbm-quantile-{run_id}",
         artifact_uri=model_gcs_dir,
+        serving_container_image_uri=IMAGE_URI,
         labels=labels,
         description=(
             f"LightGBM Quantile, TRAIN>={metrics_raw['train_start']}, "
@@ -160,9 +169,27 @@ def main() -> None:
     train_start = str(fold5["train_start"])
     val_start = str(fold5["val_start"])
     val_end = str(fold5["val_end"])
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
-    model_gcs_dir = submit_training_job(train_start, val_start, val_end, run_id)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model-gcs-dir",
+        default=None,
+        help=(
+            "Si se pasa, salta submit_training_job() y solo lee metrics.json + "
+            "registra en Model Registry desde este directorio ya existente -- "
+            "para reintentar el registro sin re-entrenar (ej. tras un fix en "
+            "register_model() como el de serving_container_image_uri)."
+        ),
+    )
+    args = parser.parse_args()
+
+    if args.model_gcs_dir:
+        run_id = args.model_gcs_dir.rstrip("/").split("/")[-2]  # .../{run_id}/model
+        model_gcs_dir = args.model_gcs_dir
+    else:
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        model_gcs_dir = submit_training_job(train_start, val_start, val_end, run_id)
+
     metrics_raw = read_metrics(model_gcs_dir)
     register_model(model_gcs_dir, metrics_raw, run_id)
 
