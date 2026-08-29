@@ -8,6 +8,14 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+# libgomp1: runtime de OpenMP -- el binario compilado de LightGBM lo
+# necesita en tiempo de carga (ctypes.cdll.LoadLibrary), y python:3.10-slim
+# no lo trae por defecto (a diferencia de imagenes "full"). Sin esto:
+# "OSError: libgomp.so.1: cannot open shared object file". --no-install-recommends
+# + limpieza de apt lists mantiene la imagen minimalista.
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements-training.txt .
 RUN pip install --no-cache-dir -r requirements-training.txt
 
