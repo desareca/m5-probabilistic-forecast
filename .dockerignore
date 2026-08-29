@@ -1,0 +1,15 @@
+# Evita mandar todo el repo (data raw, .git, notebooks, terraform state)
+# como build context -- el Dockerfile solo COPY-a src/ y pipelines/, pero
+# sin esto Docker igual empaqueta y envia el resto al daemon antes de filtrar.
+.git/
+data/
+notebooks/
+terraform/
+phase-summaries/
+models/
+*.ipynb
+*.md
+venv/
+.venv/
+__pycache__/
+*.pyc
