@@ -42,7 +42,9 @@ logger = logging.getLogger(__name__)
 PROJECT = "mle-m5-forecast"
 REGION = "us-central1"
 BUCKET = "mle-m5-forecast-m5-bucket"
-IMAGE_URI = f"{REGION}-docker.pkg.dev/{PROJECT}/m5-training/lgbm-quantile:v1"
+# v2: fix del ModuleNotFoundError de pmdarima/statsmodels (ver src/common.py) --
+# v1 nunca completo un CustomJob exitoso, no hace falta mantenerla.
+IMAGE_URI = f"{REGION}-docker.pkg.dev/{PROJECT}/m5-training/lgbm-quantile:v2"
 
 MACHINE_TYPE = "n1-standard-8"  # ver skill-vertex-ai.md: CPU basta, buen balance para el tamano del M5.
 

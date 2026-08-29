@@ -30,11 +30,10 @@ from google.cloud import bigquery
 from scipy.stats import norm
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
+from src.common import DATASET, PROJECT, QUANTILE_LEVELS, get_bq_client, write_to_bigquery  # noqa: F401 -- re-exportados, ver src/common.py
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
-
-PROJECT = "mle-m5-forecast"
-DATASET = "m5_dataset"
 
 SAMPLE_TABLE = f"{PROJECT}.{DATASET}.arima_sample"
 SALES_TABLE = f"{PROJECT}.{DATASET}.sales_long"
@@ -73,12 +72,6 @@ AUTO_ARIMA_KWARGS = dict(
 # degenerado (comun en series muy_lento donde auto_arima puede converger a
 # un modelo que predice ~constante con residuos ~0).
 DEGENERATE_VARIANCE_THRESHOLD = 1e-6
-
-QUANTILE_LEVELS = {"p05": 0.05, "p25": 0.25, "p50": 0.50, "p75": 0.75, "p95": 0.95}
-
-
-def get_bq_client() -> bigquery.Client:
-    return bigquery.Client(project=PROJECT)
 
 
 def fetch_sample_metadata(client: bigquery.Client) -> pd.DataFrame:
@@ -262,16 +255,6 @@ def run_arima_baseline() -> tuple[pd.DataFrame, pd.DataFrame]:
     )
 
     return predictions_df, metadata_df
-
-
-def write_to_bigquery(client: bigquery.Client, df: pd.DataFrame, table: str, schema: list[bigquery.SchemaField]) -> None:
-    job_config = bigquery.LoadJobConfig(
-        schema=schema,
-        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
-    )
-    load_job = client.load_table_from_dataframe(df, table, job_config=job_config)
-    load_job.result()
-    logger.info(f"Escritas {len(df)} filas en {table}")
 
 
 def print_convergence_summary(metadata_df: pd.DataFrame) -> None:

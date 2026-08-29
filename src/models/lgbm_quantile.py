@@ -46,14 +46,7 @@ import numpy as np
 import pandas as pd
 from google.cloud import bigquery
 
-from src.models.arima_baseline import (
-    DATASET,
-    PROJECT,
-    QUANTILE_LEVELS,
-    fetch_date_window,
-    get_bq_client,
-    write_to_bigquery,
-)
+from src.common import DATASET, PROJECT, QUANTILE_LEVELS, get_bq_client, write_to_bigquery
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -271,6 +264,13 @@ def predict_quantiles(boosters: dict[str, lgb.Booster], val_df: pd.DataFrame) ->
 
 
 def run_lgbm_quantile() -> pd.DataFrame:
+    # Import local, no a nivel de modulo: fetch_date_window vive en
+    # arima_baseline.py, que carga pmdarima/statsmodels -- pesado e
+    # innecesario para pipelines/training_job.py (corre dentro del
+    # container Docker de Vertex AI, sin esas deps). Solo el smoke test
+    # local de Fase 4c (esta funcion) necesita este import.
+    from src.models.arima_baseline import fetch_date_window
+
     client = get_bq_client()
 
     train_start, val_start, val_end = fetch_date_window(client)
