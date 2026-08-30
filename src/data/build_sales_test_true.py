@@ -63,60 +63,54 @@ def get_current_max_day_num(client: bigquery.Client) -> int:
 def reshape_incremental_days(client: bigquery.Client, current_max_day_num: int) -> None:
     """Reshape wide -> long de sales_evaluation_wide, filtrado a day_num >
     current_max_day_num -- solo los dias que NO estan ya en sales_long.
-    Mismo parseo de item_id/store_id y misma logica de CROSS JOIN +
-    JSON_EXTRACT_SCALAR que sql/reshape_wide_to_long.sql, generalizada a
-    un rango de dias dinamico via GENERATE_ARRAY en vez del literal 1941
-    hardcodeado (asi funciona sin importar cuantos dias tenga en realidad
-    el CSV de evaluation)."""
-    table = client.get_table(WIDE_TABLE)
-    day_cols = [f.name for f in table.schema if f.name.startswith("d_")]
-    max_day_available = max(int(c.split("_")[1]) for c in day_cols)
 
-    if max_day_available <= current_max_day_num:
+    UNION ALL de un SELECT por columna de dia (mismo patron que
+    sql/reshape_wide_to_long.py, el script que realmente se corrio en Fase
+    2 -- ver docstring del modulo), NO un CROSS JOIN con una tabla de
+    dias: BigQuery exige que el segundo argumento de JSON_EXTRACT_SCALAR
+    sea una expresion constante, y el day_col de un CROSS JOIN varia por
+    fila -- probado en la practica, falla con "Argument 2 to
+    JSON_EXTRACT_SCALAR must be a constant expression". Con UNION ALL,
+    cada SELECT tiene su propio day_col como literal de verdad. Viable
+    aca porque son ~28 columnas (no 1941 como el reshape completo de
+    sales_long, que si necesito batching)."""
+    table = client.get_table(WIDE_TABLE)
+    day_cols = sorted(
+        [f.name for f in table.schema if f.name.startswith("d_")],
+        key=lambda c: int(c.split("_")[1]),
+    )
+    incremental_cols = [c for c in day_cols if int(c.split("_")[1]) > current_max_day_num]
+
+    if not incremental_cols:
         raise RuntimeError(
-            f"sales_evaluation_wide solo tiene hasta d_{max_day_available}, pero sales_long ya "
-            f"llega a day_num={current_max_day_num} -- no hay dias nuevos que extraer."
+            f"sales_evaluation_wide no tiene columnas d_N con N > {current_max_day_num} -- "
+            f"no hay dias nuevos que extraer."
         )
+
+    selects = []
+    for col in incremental_cols:
+        day_num = int(col.split("_")[1])
+        selects.append(f"""
+          SELECT
+            CONCAT(SPLIT(id, '_')[OFFSET(0)], '_', SPLIT(id, '_')[OFFSET(1)], '_', SPLIT(id, '_')[OFFSET(2)]) AS item_id,
+            CONCAT(SPLIT(id, '_')[OFFSET(3)], '_', SPLIT(id, '_')[OFFSET(4)]) AS store_id,
+            DATE_ADD(DATE('{START_DATE}'), INTERVAL {day_num - 1} DAY) AS date,
+            CAST(`{col}` AS INT64) AS sales
+          FROM `{WIDE_TABLE}`
+          WHERE `{col}` IS NOT NULL
+        """)
 
     query = f"""
         CREATE OR REPLACE TABLE `{DEST_TABLE}`
         PARTITION BY date
         CLUSTER BY item_id, store_id
         AS
-        WITH parsed_ids AS (
-          SELECT
-            id,
-            CONCAT(SPLIT(id, '_')[OFFSET(0)], '_', SPLIT(id, '_')[OFFSET(1)], '_', SPLIT(id, '_')[OFFSET(2)]) AS item_id,
-            CONCAT(SPLIT(id, '_')[OFFSET(3)], '_', SPLIT(id, '_')[OFFSET(4)]) AS store_id,
-            t
-          FROM `{WIDE_TABLE}` t
-        ),
-        day_numbers AS (
-          SELECT num AS day_num, CONCAT('d_', CAST(num AS STRING)) AS day_col
-          FROM UNNEST(GENERATE_ARRAY({current_max_day_num + 1}, {max_day_available})) AS num
-        ),
-        unnested_days AS (
-          SELECT
-            parsed_ids.item_id,
-            parsed_ids.store_id,
-            day_num,
-            SAFE.FLOAT64(JSON_EXTRACT_SCALAR(TO_JSON_STRING(parsed_ids.t), CONCAT('$.', day_col))) AS sales
-          FROM parsed_ids
-          CROSS JOIN day_numbers
-        )
-        SELECT
-          item_id,
-          store_id,
-          DATE_ADD(DATE('{START_DATE}'), INTERVAL day_num - 1 DAY) AS date,
-          CAST(sales AS INT64) AS sales
-        FROM unnested_days
-        WHERE sales IS NOT NULL
+        {"UNION ALL".join(selects)}
     """
     job = client.query(query)
     job.result()
     dest = client.get_table(DEST_TABLE)
-    n_days = max_day_available - current_max_day_num
-    logger.info(f"{DEST_TABLE}: {dest.num_rows} filas ({n_days} dias x series).")
+    logger.info(f"{DEST_TABLE}: {dest.num_rows} filas ({len(incremental_cols)} dias x series).")
 
 
 def main() -> None:
