@@ -43,10 +43,10 @@ logger = logging.getLogger(__name__)
 PROJECT = "mle-m5-forecast"
 REGION = "us-central1"
 BUCKET = "mle-m5-forecast-m5-bucket"
-# v4: fix de OSError libgomp.so.1 -- python:3.10-slim no trae libgomp1,
-# que el binario compilado de LightGBM necesita (ver Dockerfile).
-# v1-v3 nunca completaron un CustomJob, no hace falta mantenerlas.
-IMAGE_URI = f"{REGION}-docker.pkg.dev/{PROJECT}/m5-training/lgbm-quantile:v4"
+# v5: agrega google-cloud-aiplatform a requirements-training.txt para que
+# la MISMA imagen sirva de base_image a los componentes livianos del KFP
+# pipeline (Tarea 3) -- sin cambios en la logica de entrenamiento en si.
+IMAGE_URI = f"{REGION}-docker.pkg.dev/{PROJECT}/m5-training/lgbm-quantile:v5"
 
 MACHINE_TYPE = "n1-standard-8"  # ver skill-vertex-ai.md: CPU basta, buen balance para el tamano del M5.
 
