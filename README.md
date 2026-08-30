@@ -52,8 +52,8 @@ decisiones de diseño y su justificación, en [`INSTRUCCIONES.md`](INSTRUCCIONES
 | 4. Modelos | ✅ Completa | [`phase-summaries/04-modelos.md`](phase-summaries/04-modelos.md) — ARIMA clásico, BQML ARIMA_PLUS, LightGBM Cuantil |
 | 5. Validación (walk-forward CV) | ✅ Completa | [`phase-summaries/05-walk-forward-cv.md`](phase-summaries/05-walk-forward-cv.md) — 5 folds × 3 modelos |
 | 6. Evaluación | ✅ Completa | [`phase-summaries/06-evaluacion.md`](phase-summaries/06-evaluacion.md) — LightGBM gana en todos los segmentos analizados; hallazgo de diseño: el CV nunca valida Navidad |
-| 7. MLOps | ⏳ Pendiente | |
-| 8. Tablas agregadas | ⏳ Pendiente | |
+| 7. MLOps | ✅ Completa | [`phase-summaries/07-mlops.md`](phase-summaries/07-mlops.md) — Docker + Artifact Registry, Model Registry, Vertex AI Pipeline (KFP) con registro condicional, batch prediction sobre el test set real, Cloud Scheduler (pausado a propósito) |
+| 8. Tablas agregadas | ✅ Completa | [`phase-summaries/08-tablas-agregadas.md`](phase-summaries/08-tablas-agregadas.md) — 3 tablas para Looker Studio, <2.5GB facturados en total |
 | 9. Dashboard Looker Studio | ⏳ Pendiente | |
 | 10. Presentación | ⏳ Pendiente | |
 
@@ -107,6 +107,30 @@ que el costo estimado de BQML fuera ~300x el real ($104 estimado vs. $0.34 real 
 que se marcaron y excluyeron explícitamente (mismo principio de "sin fallback silencioso" que
 las 22 series `NaN` de Fase 4b).
 
+## El hallazgo más importante del proyecto — CV vs. test set real
+
+El test set real de M5 (`sales_train_evaluation.csv`) estuvo físicamente bloqueado —
+nunca cargado a BigQuery — desde la Fase 2 hasta la Fase 7. Al desbloquearlo por
+primera y única vez para la evaluación final:
+
+| Percentil | CV (5-fold, Fase 5) | Test real (Fase 7) |
+|---|---|---|
+| P05 | 0.058 | 0.071 |
+| P25 | 0.240 | 0.290 |
+| P50 | 0.379 | 0.458 |
+| P75 | 0.376 | 0.453 |
+| P95 | 0.169 | 0.199 |
+| **Promedio** | **0.244** | **0.294** |
+
+**El Pinball Loss real es ~20% más alto que la estimación de CV, de forma consistente en
+los 5 percentiles.** No es un resultado que convenga suavizar: el walk-forward CV promedia
+5 folds distribuidos entre 2011 y 2016, mientras que el test real es un único período
+(abril–mayo 2016) sin ese efecto promediador — puede coincidir con dinámica de mercado
+distinta a la mezcla histórica que vio el CV. El ranking de modelos (LightGBM > BQML >
+ARIMA) sigue siendo válido, pero la magnitud absoluta de error esperable en producción es
+mayor que lo que el CV por sí solo sugiere. Detalle completo en
+[`phase-summaries/07-mlops.md`](phase-summaries/07-mlops.md).
+
 ## Cómo trabajar en el proyecto
 
 ### 1. Levantar una sesión de trabajo
@@ -145,26 +169,48 @@ pip install -r requirements.txt
 m5-probabilistic-forecast/
 ├── notebooks/
 │   ├── 01_eda.ipynb            # EDA completo (Fase 2)
-│   └── 02_evaluation.ipynb     # Comparativa de modelos + casos difíciles (Fase 6, código listo — pendiente correr)
+│   └── 02_evaluation.ipynb     # Comparativa de modelos + casos difíciles (Fase 6)
 ├── src/
-│   ├── data/                   # Carga GCS → BigQuery
-│   ├── features/                # Fourier + features SQL (Fase 3)
-│   ├── models/                  # Fase 4 (smoke test) + Fase 5 (walk-forward CV)
-│   │   ├── arima_baseline.py     #   ARIMA clásico, 1 fold (4a)
-│   │   ├── arima_cv.py           #   ARIMA clásico, 5 folds (5)
-│   │   ├── bqml_arima_cv.py      #   BQML ARIMA_PLUS, 5 folds, acotado a lgbm_sample (5)
-│   │   └── lgbm_quantile.py      #   LightGBM Cuantil, 1 fold (4c)
-│   │   └── lgbm_cv.py            #   LightGBM Cuantil, 5 folds (5)
-│   └── evaluation/               # Walk-forward CV + Pinball Loss (Fase 5-6)
-│       ├── folds.py                #   Genera los 5 folds dinámicamente
-│       ├── cv_io.py                #   Escritura idempotente por fold_id
-│       ├── metrics.py              #   Fórmula de Pinball Loss
-│       ├── build_cv_metrics.py     #   Consolida métricas en BigQuery
+│   ├── common.py                # PROJECT/DATASET/QUANTILE_LEVELS + helpers BigQuery,
+│   │                             #   compartido sin arrastrar pmdarima/statsmodels (Fase 7)
+│   ├── data/
+│   │   ├── load_to_bq.py          #   Carga GCS → BigQuery (WRITE_TRUNCATE explícito)
+│   │   └── build_sales_test_true.py # Desbloquea el test set real → test_labels (Fase 7)
+│   ├── features/                 # Fourier + features SQL (Fase 3)
+│   │   └── build_features_test.py  # Features para el test set real (Fase 7)
+│   ├── models/                   # Fase 4 (smoke test) + Fase 5 (walk-forward CV)
+│   │   ├── arima_baseline.py       #   ARIMA clásico, 1 fold (4a)
+│   │   ├── arima_cv.py             #   ARIMA clásico, 5 folds (5)
+│   │   ├── bqml_arima_cv.py        #   BQML ARIMA_PLUS, 5 folds, acotado a lgbm_sample (5)
+│   │   ├── lgbm_quantile.py        #   LightGBM Cuantil, 1 fold (4c)
+│   │   └── lgbm_cv.py              #   LightGBM Cuantil, 5 folds (5)
+│   └── evaluation/                # Walk-forward CV + Pinball Loss (Fase 5-6)
+│       ├── folds.py                 #   Genera los 5 folds dinámicamente
+│       ├── cv_io.py                 #   Escritura idempotente por fold_id
+│       ├── metrics.py               #   Fórmula de Pinball Loss
+│       ├── build_cv_metrics.py      #   Consolida métricas en BigQuery
 │       ├── diagnose_bqml_outliers.py # Diagnóstico de series inestables
-│       └── build_case_analysis.py  #   Categoría real + productos nuevos + eventos (Fase 6)
-├── sql/                          # Queries de referencia (reshape, muestras, 4b full-scale)
-├── pipelines/                     # Vertex AI Pipelines / KFP (Fase 7)
+│       └── build_case_analysis.py   #   Categoría real + productos nuevos + eventos (Fase 6)
+├── sql/
+│   ├── aggregations/              # 3 tablas para Looker Studio (Fase 8)
+│   │   ├── agg_predictions.sql
+│   │   ├── agg_metrics.sql
+│   │   ├── agg_weekly_comparison.sql
+│   │   └── build_aggregations.py
+│   └── *.sql                      # Reshape, muestras, 4b full-scale
+├── pipelines/                     # Vertex AI Custom Training + Pipelines / KFP (Fase 7)
+│   ├── training_job.py              # Entrypoint del container de training
+│   ├── submit_training_job.py       # Lanza CustomJob + registra en Model Registry
+│   ├── m5_pipeline.py               # Pipeline KFP: ingest→features→train→evaluate→register
+│   ├── compile_pipeline.py          # Compila a YAML (+ publica en GCS para Cloud Scheduler)
+│   ├── run_pipeline.py              # Lanza el PipelineJob en Vertex AI
+│   └── batch_predict.py             # Predicción + evaluación sobre el test set real
+├── Dockerfile                     # Container de training (Fase 7)
+├── requirements-training.txt      # Deps mínimas del container (sin Jupyter/TF/kfp)
 ├── terraform/                     # Infraestructura como código
+│   ├── artifact_registry.tf         # Repo Docker (Fase 7)
+│   ├── iam_vertex.tf                # Permisos actAs para CustomJobs (Fase 7)
+│   └── scheduler.tf                 # Cloud Scheduler, pausado a propósito (Fase 7)
 ├── scripts/
 │   ├── start-session.sh          # Levanta la Cloud Workstation efímera
 │   └── stop-session.sh           # La destruye al terminar
@@ -188,10 +234,17 @@ BQML ARIMA_PLUS (que no cobra a la tarifa estándar de BigQuery), en
 | BQML ARIMA_PLUS, walk-forward CV (Fase 5, 5 folds × ~3,000 series) | $1.70 (5 × $0.34) |
 | Materialización de tabla pre-filtrada para CV (una vez) | ~$0.37 |
 | ARIMA clásico + LightGBM Cuantil (Fases 4/5) | $0 (compute local en la Workstation) |
+| Tablas agregadas para Looker Studio (Fase 8, 3 tablas) | ~$0.014 |
 
 El hallazgo del bug de `JOIN` sin pruning (ver Resultados arriba) es la diferencia entre este
 número real y lo que hubiera costado sin corregirlo: ~$104/fold × 5 folds ≈ $520 solo en
 walk-forward CV.
+
+**Fase 7 (Vertex AI Custom Jobs + Pipelines):** no se revisó la facturación exacta —
+estimado bajo un dólar en total. Los jobs son de pocos minutos en `n1-standard-8` (no
+horas), y Cloud Build/Artifact Registry están cubiertos por el tier gratuito a este
+volumen de uso. El Cloud Scheduler de reentrenamiento mensual quedó **pausado a
+propósito** (ver Decisiones de diseño) — no genera costo recurrente.
 
 ## Decisiones de diseño destacadas
 
@@ -205,6 +258,18 @@ walk-forward CV.
   tabla. BQML corre sobre la muestra desde Fase 5 en adelante, no sobre las 30,490 completas
   (que sí se usaron en el run de referencia de Fase 4b) — decisión de costo/tiempo documentada
   en `INSTRUCCIONES.md`.
+- **Cloud Scheduler de reentrenamiento mensual, creado pausado a propósito** — el dataset
+  M5 es estático (`sales_long`/`features_train` nunca cambian), así que una cadencia de
+  calendario ciega entrenaría siempre sobre los mismos datos, sin señal real de "datos
+  nuevos". Se implementó la capacidad técnica completa (Cloud Scheduler → REST API de
+  Vertex AI Pipelines, con el permiso `serviceAccountTokenCreator` que requiere) para
+  demostrarla sin gastar cómputo en reentrenamientos sin valor. En producción real con
+  datos vivos, el trigger correcto sería llegada de datos nuevos o drift de métricas, no
+  un cron mensual.
+- **Batch prediction custom, no el mecanismo nativo de Vertex AI** — el modelo registrado
+  no tiene un serving container funcional (no existe container prebuilt de Vertex AI para
+  LightGBM), así que la predicción sobre el test set real (Fase 7) carga los `.txt` del
+  modelo directo desde GCS y predice localmente, en vez de un Batch Prediction Job nativo.
 - Más decisiones y su razonamiento completo en `INSTRUCCIONES.md`.
 
 ## Autor
