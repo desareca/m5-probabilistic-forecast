@@ -50,6 +50,18 @@ resource "google_service_account_iam_member" "cloudscheduler_can_impersonate_m5_
   depends_on = [google_project_service.cloudscheduler_api]
 }
 
+# mle-m5-sa tambien necesita poder OPERAR jobs de Scheduler (crear/listar/
+# correr manualmente con "gcloud scheduler jobs run") -- los roles de Fase 1
+# (bigquery.admin/storage.admin/aiplatform.admin) no cubren este servicio.
+# Sin esto: PERMISSION_DENIED "lacks IAM permission cloudscheduler.jobs.run".
+resource "google_project_iam_member" "m5_sa_cloudscheduler_admin" {
+  project = var.project_id
+  role    = "roles/cloudscheduler.admin"
+  member  = "serviceAccount:${data.google_service_account.m5_sa.email}"
+
+  depends_on = [google_project_service.cloudscheduler_api]
+}
+
 resource "google_cloud_scheduler_job" "m5_pipeline_monthly" {
   name        = "m5-pipeline-monthly-retrain"
   description = "Dispara m5-lgbm-quantile-pipeline via REST API de Vertex AI. PAUSADO por defecto -- ver comentario del archivo."
