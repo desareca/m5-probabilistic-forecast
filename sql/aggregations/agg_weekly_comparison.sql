@@ -50,5 +50,4 @@ SELECT
   SUM(p05) AS pred_p05,
   SUM(p95) AS pred_p95
 FROM joined
-GROUP BY week, category
-ORDER BY week, category;
+GROUP BY week, category;
