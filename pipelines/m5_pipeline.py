@@ -61,8 +61,15 @@ FEATURES_SQL = _SQL_PATH.read_text()
 
 BQ_PACKAGES = ["google-cloud-bigquery==3.12.0", "db-dtypes==1.1.1", "pyarrow==13.0.0"]
 
+# mirror.gcr.io/library/..., no python:3.10-slim directo de Docker Hub:
+# el CustomJob de ingest-check fallo con exit code 1 y CERO logs de
+# contenedor (ni siquiera el arranque de Python) -- consistente con que la
+# imagen nunca llego a descargarse (Docker Hub throttlea pulls anonimos
+# desde la red de Vertex AI). El espejo de Google evita ese problema.
+BASE_IMAGE = "mirror.gcr.io/library/python:3.10-slim"
 
-@dsl.component(base_image="python:3.10-slim", packages_to_install=BQ_PACKAGES)
+
+@dsl.component(base_image=BASE_IMAGE, packages_to_install=BQ_PACKAGES)
 def ingest_check(project: str, dataset: str) -> None:
     """Chequeo de salud, no una carga real -- ver docstring del modulo."""
     from google.cloud import bigquery
@@ -76,7 +83,7 @@ def ingest_check(project: str, dataset: str) -> None:
         print(f"{table}: {count} filas OK")
 
 
-@dsl.component(base_image="python:3.10-slim", packages_to_install=BQ_PACKAGES)
+@dsl.component(base_image=BASE_IMAGE, packages_to_install=BQ_PACKAGES)
 def build_features(sql_text: str, project: str, dataset: str) -> None:
     """Reconstruye features_train SOLO si esta vacia/no existe -- idempotente,
     ver docstring del modulo (evita recalcular 11.1M filas en cada corrida)."""
@@ -112,7 +119,7 @@ def train(train_start: str, val_start: str, val_end: str, output_gcs_path: str):
     )
 
 
-@dsl.component(base_image="python:3.10-slim", packages_to_install=["google-cloud-storage==2.10.0"])
+@dsl.component(base_image=BASE_IMAGE, packages_to_install=["google-cloud-storage==2.10.0"])
 def evaluate(model_gcs_dir: str, baseline_avg_pinball_loss: float) -> bool:
     """True si el avg Pinball Loss del run mejora (es menor a) el baseline."""
     import json
@@ -132,7 +139,7 @@ def evaluate(model_gcs_dir: str, baseline_avg_pinball_loss: float) -> bool:
 
 
 @dsl.component(
-    base_image="python:3.10-slim",
+    base_image=BASE_IMAGE,
     packages_to_install=["google-cloud-aiplatform==1.32.0", "google-cloud-storage==2.10.0"],
 )
 def register(model_gcs_dir: str, project: str, region: str, serving_image: str, run_id: str) -> str:
