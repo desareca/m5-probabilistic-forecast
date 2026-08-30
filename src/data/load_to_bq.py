@@ -49,6 +49,15 @@ def load_csv_to_bigquery(
         max_bad_records=max_bad_records,
         source_format=bigquery.SourceFormat.CSV,
         autodetect=True,
+        # WRITE_TRUNCATE explicito -- sin esto, el default de BigQuery para
+        # load jobs es WRITE_APPEND: correr este script dos veces duplica
+        # cada fila en vez de reemplazar. Bug real encontrado en Fase 7,
+        # Tarea 4 (build_sales_test_true.py duplico sales_evaluation_wide
+        # exactamente 2x al reintentar despues de un fallo en el paso
+        # siguiente). Idempotencia > preservar histor​ial de carga aca --
+        # esta tabla siempre debe reflejar el ultimo CSV cargado, no
+        # acumular corridas.
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
     )
 
     destination_table = f"{PROJECT_ID}.{dataset_id}.{table_id}"
