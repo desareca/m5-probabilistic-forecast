@@ -51,7 +51,7 @@ PROJECT = "mle-m5-forecast"
 REGION = "us-central1"
 DATASET = "m5_dataset"
 BUCKET = "mle-m5-forecast-m5-bucket"
-IMAGE_URI = f"{REGION}-docker.pkg.dev/{PROJECT}/m5-training/lgbm-quantile:v4"
+IMAGE_URI = f"{REGION}-docker.pkg.dev/{PROJECT}/m5-training/lgbm-quantile:v5"
 
 # Ver docstring del modulo -- promedio de 5-fold CV, LightGBM, scope completo.
 BASELINE_AVG_PINBALL_LOSS = 0.2444
@@ -61,15 +61,24 @@ FEATURES_SQL = _SQL_PATH.read_text()
 
 BQ_PACKAGES = ["google-cloud-bigquery==3.12.0", "db-dtypes==1.1.1", "pyarrow==13.0.0"]
 
-# mirror.gcr.io/library/..., no python:3.10-slim directo de Docker Hub:
-# el CustomJob de ingest-check fallo con exit code 1 y CERO logs de
-# contenedor (ni siquiera el arranque de Python) -- consistente con que la
-# imagen nunca llego a descargarse (Docker Hub throttlea pulls anonimos
-# desde la red de Vertex AI). El espejo de Google evita ese problema.
-BASE_IMAGE = "mirror.gcr.io/library/python:3.10-slim"
+# BASE_IMAGE = nuestra propia imagen de Artifact Registry (Tarea 1/2), NO
+# una imagen publica de Docker Hub con packages_to_install. Motivo real:
+# mirror.gcr.io/library/python:3.10-slim fue rechazado por Vertex AI como
+# "Invalid image URI" (Custom Jobs solo aceptan Artifact Registry/GCR/
+# Docker Hub, no espejos arbitrarios), y python:3.10-slim (Docker Hub)
+# fallaba con exit code 1 sin NINGUN log de contenedor -- consistente con
+# el mismo patron de red saliente poco confiable hacia registries/PyPI
+# externos que ya vimos en Cloud Shell (docker push con "connection
+# refused", resuelto entonces con Cloud Build). Reutilizar la imagen que
+# YA sabemos que Vertex AI puede jalar sin problema, sin pip install en
+# runtime (packages_to_install tambien depende de salida a PyPI), evita la
+# causa raiz en vez de solo cambiar de registry. requirements-training.txt
+# ahora incluye google-cloud-aiplatform para que register() tambien
+# funcione con esta misma imagen.
+BASE_IMAGE = IMAGE_URI
 
 
-@dsl.component(base_image=BASE_IMAGE, packages_to_install=BQ_PACKAGES)
+@dsl.component(base_image=BASE_IMAGE)
 def ingest_check(project: str, dataset: str) -> None:
     """Chequeo de salud, no una carga real -- ver docstring del modulo."""
     from google.cloud import bigquery
@@ -83,7 +92,7 @@ def ingest_check(project: str, dataset: str) -> None:
         print(f"{table}: {count} filas OK")
 
 
-@dsl.component(base_image=BASE_IMAGE, packages_to_install=BQ_PACKAGES)
+@dsl.component(base_image=BASE_IMAGE)
 def build_features(sql_text: str, project: str, dataset: str) -> None:
     """Reconstruye features_train SOLO si esta vacia/no existe -- idempotente,
     ver docstring del modulo (evita recalcular 11.1M filas en cada corrida)."""
@@ -119,7 +128,7 @@ def train(train_start: str, val_start: str, val_end: str, output_gcs_path: str):
     )
 
 
-@dsl.component(base_image=BASE_IMAGE, packages_to_install=["google-cloud-storage==2.10.0"])
+@dsl.component(base_image=BASE_IMAGE)
 def evaluate(model_gcs_dir: str, baseline_avg_pinball_loss: float) -> bool:
     """True si el avg Pinball Loss del run mejora (es menor a) el baseline."""
     import json
@@ -138,10 +147,7 @@ def evaluate(model_gcs_dir: str, baseline_avg_pinball_loss: float) -> bool:
     return improved
 
 
-@dsl.component(
-    base_image=BASE_IMAGE,
-    packages_to_install=["google-cloud-aiplatform==1.32.0", "google-cloud-storage==2.10.0"],
-)
+@dsl.component(base_image=BASE_IMAGE)
 def register(model_gcs_dir: str, project: str, region: str, serving_image: str, run_id: str) -> str:
     """Mismo criterio de labels/serving_container que pipelines/submit_training_job.py
     (Tarea 2) -- ver ese archivo para el caveat de por que serving_image no
