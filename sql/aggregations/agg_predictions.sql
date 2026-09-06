@@ -1,11 +1,21 @@
 -- ============================================================================
--- Fase 8 -- agg_predictions
+-- Fase 8 (revisado Fase 9) -- agg_predictions
 -- Predicciones LightGBM (modelo ganador) agregadas por dia/categoria/tienda.
--- Combina los 5 folds de walk-forward CV (Fase 5, historia dispersa
--- 2011-2016) + el test set real (Fase 7, unico periodo nunca visto) --
--- ambos son predicciones de LightGBM, nunca mezclados con ARIMA/BQML aca
--- (esta tabla es "la" serie de prediccion para el dashboard, no una
--- comparativa de modelos -- esa es agg_metrics).
+--
+-- CAMBIO respecto al diseno original: en vez de combinar los 5 folds de
+-- walk-forward CV (dispersos 2011-2016) con el test set real, esta version
+-- se acota a la ventana continua de 56 dias fold5 + test real
+-- (2016-03-28 -> 2016-05-22) -- la unica combinacion de periodos que es
+-- realmente contigua en el tiempo, apta para graficar como serie temporal
+-- sin huecos ni saltos.
+--
+-- Bug encontrado al construir el dashboard: predictions_lgbm_cv corre sobre
+-- lgbm_sample (~3,001 series) pero predictions_test (Fase 7, Tarea 4) corrio
+-- sobre las 30,490 series completas. Sumar/promediar ambas fuentes sin
+-- normalizar el universo de series producia un salto de escala ~10x justo
+-- en el empalme (2016-04-24 -> 2016-04-25) que no reflejaba ningun cambio
+-- real de demanda. Fix: INNER JOIN de predictions_test contra lgbm_sample
+-- para acotarlo al mismo universo de ~3,001 series que fold 5.
 --
 -- Particionada por date, sin item_id/store_id-level detail (agregado a
 -- categoria x tienda) -- columnas minimas para Looker Studio, por diseno
@@ -18,9 +28,12 @@ AS
 WITH combined AS (
   SELECT item_id, store_id, date, p05, p25, p50, p75, p95
   FROM `mle-m5-forecast.m5_dataset.predictions_lgbm_cv`
+  WHERE fold_id = 5
   UNION ALL
-  SELECT item_id, store_id, date, p05, p25, p50, p75, p95
-  FROM `mle-m5-forecast.m5_dataset.predictions_test`
+  SELECT p.item_id, p.store_id, p.date, p.p05, p.p25, p.p50, p.p75, p.p95
+  FROM `mle-m5-forecast.m5_dataset.predictions_test` p
+  INNER JOIN `mle-m5-forecast.m5_dataset.lgbm_sample` s
+    ON p.item_id = s.item_id AND p.store_id = s.store_id
 )
 SELECT
   c.date,
