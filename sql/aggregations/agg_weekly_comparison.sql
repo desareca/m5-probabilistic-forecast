@@ -60,11 +60,11 @@ joined AS (
 SELECT
   DATE_TRUNC(date, WEEK(MONDAY)) AS week,
   category,
-  SUM(actual_sales) AS actual_sales,
-  SUM(p50) AS pred_p50,
-  SUM(p05) AS pred_p05,
-  SUM(p25) AS pred_p25,
-  SUM(p75) AS pred_p75,
-  SUM(p95) AS pred_p95
+  ROUND(SUM(actual_sales), 2) AS actual_sales,
+  ROUND(SUM(p50), 2) AS pred_p50,
+  ROUND(SUM(p05), 2) AS pred_p05,
+  ROUND(SUM(p25), 2) AS pred_p25,
+  ROUND(SUM(p75), 2) AS pred_p75,
+  ROUND(SUM(p95), 2) AS pred_p95
 FROM joined
 GROUP BY week, category;
