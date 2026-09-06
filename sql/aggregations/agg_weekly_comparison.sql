@@ -1,14 +1,24 @@
 -- ============================================================================
--- Fase 8 -- agg_weekly_comparison
+-- Fase 8 (revisado Fase 9) -- agg_weekly_comparison
 -- Real vs. predicho semanal por categoria (SUM de venta agregada, no AVG --
 -- responde "cuanta demanda total" por semana/categoria, la pregunta de
 -- negocio real para decisiones de inventario).
 --
--- Combina sales_long + test_labels (ventas reales) con predictions_lgbm_cv
--- + predictions_test (predicciones), mismo criterio de union que
--- agg_predictions.sql -- ambas fuentes cubren exactamente las mismas
--- fechas (folds de CV + test set), asi que el JOIN INNER no pierde filas
--- por asimetria de cobertura.
+-- CAMBIO respecto al diseno original: acotado a la ventana continua de
+-- 56 dias fold5 + test real (2016-03-28 -> 2016-05-22), no a los 5 folds
+-- de CV dispersos 2011-2016 + test. Esa version original producia un
+-- grafico de serie temporal con "islas" (huecos de anos entre folds) sin
+-- sentido para visualizar como tendencia -- ver discusion Fase 9.
+--
+-- Bug encontrado y corregido: predictions_lgbm_cv corre sobre lgbm_sample
+-- (~3,001 series) pero predictions_test corrio sobre las 30,490 series
+-- completas (Fase 7, Tarea 4) -- sumarlas sin normalizar el universo de
+-- series producia un salto de escala ~10x justo en el empalme
+-- (2016-04-24 -> 2016-04-25). Fix: INNER JOIN de predictions_test contra
+-- lgbm_sample, igual que en agg_predictions.sql, para que ambos tramos
+-- de la ventana compartan exactamente el mismo universo de ~3,001 series
+-- tanto en las predicciones como en la venta real (via el JOIN con
+-- actual_combined mas abajo, que hereda el filtro por construccion).
 -- ============================================================================
 
 CREATE OR REPLACE TABLE `mle-m5-forecast.m5_dataset.agg_weekly_comparison`
@@ -24,9 +34,12 @@ WITH actual_combined AS (
 pred_combined AS (
   SELECT item_id, store_id, date, p05, p50, p95
   FROM `mle-m5-forecast.m5_dataset.predictions_lgbm_cv`
+  WHERE fold_id = 5
   UNION ALL
-  SELECT item_id, store_id, date, p05, p50, p95
-  FROM `mle-m5-forecast.m5_dataset.predictions_test`
+  SELECT p.item_id, p.store_id, p.date, p.p05, p.p50, p.p95
+  FROM `mle-m5-forecast.m5_dataset.predictions_test` p
+  INNER JOIN `mle-m5-forecast.m5_dataset.lgbm_sample` s
+    ON p.item_id = s.item_id AND p.store_id = s.store_id
 ),
 joined AS (
   SELECT
