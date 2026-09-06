@@ -54,7 +54,7 @@ decisiones de diseño y su justificación, en [`INSTRUCCIONES.md`](INSTRUCCIONES
 | 6. Evaluación | ✅ Completa | [`phase-summaries/06-evaluacion.md`](phase-summaries/06-evaluacion.md) — LightGBM gana en todos los segmentos analizados; hallazgo de diseño: el CV nunca valida Navidad |
 | 7. MLOps | ✅ Completa | [`phase-summaries/07-mlops.md`](phase-summaries/07-mlops.md) — Docker + Artifact Registry, Model Registry, Vertex AI Pipeline (KFP) con registro condicional, batch prediction sobre el test set real, Cloud Scheduler (pausado a propósito) |
 | 8. Tablas agregadas | ✅ Completa | [`phase-summaries/08-tablas-agregadas.md`](phase-summaries/08-tablas-agregadas.md) — 3 tablas para Looker Studio, <2.5GB facturados en total |
-| 9. Dashboard Looker Studio | 🔄 En progreso | [Ver dashboard](https://datastudio.google.com/u/0/reporting/fd99acbf-5e6e-4299-a76a-97591b28d26a) — 2 páginas listas, quedan ajustes menores |
+| 9. Dashboard Looker Studio | ✅ Completa | [`phase-summaries/09-dashboard-looker-studio.md`](phase-summaries/09-dashboard-looker-studio.md) — 2 páginas, [dashboard público](https://datastudio.google.com/u/0/reporting/fd99acbf-5e6e-4299-a76a-97591b28d26a); 3 bugs encontrados y corregidos en el camino (escala 10x, discontinuidad temporal, falta de desglose por categoría) |
 | 10. Presentación | ⏳ Pendiente | |
 
 ## Hallazgos clave (EDA + Feature Engineering)
