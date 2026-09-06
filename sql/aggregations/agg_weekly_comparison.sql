@@ -32,11 +32,11 @@ WITH actual_combined AS (
   FROM `mle-m5-forecast.m5_dataset.test_labels`
 ),
 pred_combined AS (
-  SELECT item_id, store_id, date, p05, p50, p95
+  SELECT item_id, store_id, date, p05, p25, p50, p75, p95
   FROM `mle-m5-forecast.m5_dataset.predictions_lgbm_cv`
   WHERE fold_id = 5
   UNION ALL
-  SELECT p.item_id, p.store_id, p.date, p.p05, p.p50, p.p95
+  SELECT p.item_id, p.store_id, p.date, p.p05, p.p25, p.p50, p.p75, p.p95
   FROM `mle-m5-forecast.m5_dataset.predictions_test` p
   INNER JOIN `mle-m5-forecast.m5_dataset.lgbm_sample` s
     ON p.item_id = s.item_id AND p.store_id = s.store_id
@@ -47,7 +47,9 @@ joined AS (
     seg.category,
     a.sales AS actual_sales,
     p.p05,
+    p.p25,
     p.p50,
+    p.p75,
     p.p95
   FROM pred_combined p
   JOIN actual_combined a
@@ -61,6 +63,8 @@ SELECT
   SUM(actual_sales) AS actual_sales,
   SUM(p50) AS pred_p50,
   SUM(p05) AS pred_p05,
+  SUM(p25) AS pred_p25,
+  SUM(p75) AS pred_p75,
   SUM(p95) AS pred_p95
 FROM joined
 GROUP BY week, category;
