@@ -54,7 +54,7 @@ decisiones de diseño y su justificación, en [`INSTRUCCIONES.md`](INSTRUCCIONES
 | 6. Evaluación | ✅ Completa | [`phase-summaries/06-evaluacion.md`](phase-summaries/06-evaluacion.md) — LightGBM gana en todos los segmentos analizados; hallazgo de diseño: el CV nunca valida Navidad |
 | 7. MLOps | ✅ Completa | [`phase-summaries/07-mlops.md`](phase-summaries/07-mlops.md) — Docker + Artifact Registry, Model Registry, Vertex AI Pipeline (KFP) con registro condicional, batch prediction sobre el test set real, Cloud Scheduler (pausado a propósito) |
 | 8. Tablas agregadas | ✅ Completa | [`phase-summaries/08-tablas-agregadas.md`](phase-summaries/08-tablas-agregadas.md) — 3 tablas para Looker Studio, <2.5GB facturados en total |
-| 9. Dashboard Looker Studio | ⏳ Pendiente | |
+| 9. Dashboard Looker Studio | 🔄 En progreso | [Ver dashboard](https://datastudio.google.com/u/0/reporting/fd99acbf-5e6e-4299-a76a-97591b28d26a) — 2 páginas listas, quedan ajustes menores |
 | 10. Presentación | ⏳ Pendiente | |
 
 ## Hallazgos clave (EDA + Feature Engineering)
@@ -130,6 +130,17 @@ distinta a la mezcla histórica que vio el CV. El ranking de modelos (LightGBM >
 ARIMA) sigue siendo válido, pero la magnitud absoluta de error esperable en producción es
 mayor que lo que el CV por sí solo sugiere. Detalle completo en
 [`phase-summaries/07-mlops.md`](phase-summaries/07-mlops.md).
+
+## Dashboard
+
+**[Ver dashboard interactivo en Looker Studio →](https://datastudio.google.com/u/0/reporting/fd99acbf-5e6e-4299-a76a-97591b28d26a)**
+
+2 páginas: **Resumen** (demanda real vs. predicción, banda de incertidumbre P5/P95,
+comparativa de Pinball Loss por modelo) y **Diagnóstico de Error** (serie diaria por
+tienda + heatmap de error % por categoría × tienda). Ventana de evaluación out-of-sample:
+28 mar – 22 may 2016, sobre `lgbm_sample` (~10% del catálogo, ver Decisiones de diseño).
+
+<img src="docs/dashboard_preview.png" alt="Dashboard preview" width="800">
 
 ## Cómo trabajar en el proyecto
 
