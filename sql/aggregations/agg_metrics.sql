@@ -11,10 +11,16 @@
 -- comparacion de 2 modelos con una de 3 en la misma tabla sin poder
 -- distinguirlas facilmente en Looker Studio.
 --
--- Filas adicionales 'lgbm_test_real' (category='ALL'): el Pinball Loss real
--- del test set (Fase 7, test_evaluation_metrics) al lado de la estimacion
--- de CV -- soporta directamente el hallazgo de Fase 7 (~20% mas alto en el
--- test real que en CV) como grafico comparativo en el dashboard.
+-- Filas adicionales 'lgbm_test_real': el Pinball Loss real del test set
+-- (Fase 7, predictions_test) desglosado por categoria FOODS/HOBBIES/
+-- HOUSEHOLD -- soporta directamente el hallazgo de Fase 7 (~20% mas alto
+-- en el test real que en CV) como grafico comparativo en el dashboard,
+-- ahora comparable categoria a categoria contra los folds de CV (antes
+-- solo existia como una fila agregada category='ALL', porque
+-- test_evaluation_metrics de Fase 7 nunca desgloso por categoria -- ver
+-- src/evaluation/build_test_metrics_by_category.py, Fase 9, que recalcula
+-- esto desde predictions_test + test_labels + series_segments sin tocar
+-- el resultado original de Fase 7).
 -- ============================================================================
 
 CREATE OR REPLACE TABLE `mle-m5-forecast.m5_dataset.agg_metrics` AS
@@ -32,9 +38,8 @@ UNION ALL
 
 SELECT
   'lgbm_test_real' AS model,
-  'ALL' AS category,
+  category,
   quantile_name AS quantile,
-  pinball_loss,
+  avg_pinball_loss AS pinball_loss,
   CURRENT_DATE() AS run_date
-FROM `mle-m5-forecast.m5_dataset.test_evaluation_metrics`
-WHERE quantile_name != 'avg';
+FROM `mle-m5-forecast.m5_dataset.test_evaluation_metrics_by_category`;
