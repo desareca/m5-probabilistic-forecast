@@ -50,9 +50,7 @@ esperar) y se aplicó de forma consistente a los 4 desgloses de este documento.
 ### Comparativa general (reconfirma Fase 5)
 
 LightGBM Cuantil gana en los 5 percentiles, en ambos alcances. BQML supera a ARIMA en el
-cuerpo de la distribución (P25–P75) pero pierde en las colas (P05/P95) — coherente con que
-`ARIMA_PLUS` deriva sus intervalos asumiendo normalidad, mientras LightGBM optimiza cada
-percentil de forma independiente.
+cuerpo de la distribución (P25–P75) pero pierde en las colas (P05/P95).
 
 ### Por categoría real (FOODS/HOBBIES/HOUSEHOLD)
 
@@ -154,18 +152,6 @@ El walk-forward CV de Fase 5, al espaciar folds uniformemente sin garantizar cob
 estacional completa, nunca prueba el caso Navidad — la afirmación "el modelo maneja bien los
 casos extremos como Navidad" no está respaldada por este CV específico, aunque sí por el
 feature engineering de Fase 3.
-
----
-
-## Narrativa final del proyecto
-
-ARIMA establece el piso estadístico, BQML escala eso a producción pero mantiene las
-limitaciones de distribución normal en las colas, LightGBM Cuantil supera a ambos de forma
-consistente en todos los segmentos analizados (percentil, categoría, tasa de ceros,
-antigüedad de release). La ventaja de LightGBM es notablemente estable (~15–20%) en vez de
-concentrarse en los casos "difíciles" esperados — es una historia más matizada y honesta que
-la versión simplificada ("LightGBM brilla especialmente en demanda intermitente/productos
-nuevos"): LightGBM gana de forma consistente y pareja, no solo en los extremos.
 
 ---
 
