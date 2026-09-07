@@ -38,7 +38,12 @@ central del proyecto.
 
 ## Arquitectura
 
-Diagrama de arquitectura pendiente (Fase 10). Documentación completa fase por fase, con
+![Arquitectura GCP](docs/architecture.svg)
+
+De Kaggle a Cloud Storage, carga a BigQuery, entrenamiento de los 3 modelos, predicciones
+consolidadas de vuelta en BigQuery, tablas agregadas y dashboard en Looker Studio.
+Infraestructura (GCS, BigQuery, Artifact Registry) provista con Terraform; desarrollo en
+una Cloud Workstation efímera (ver más abajo). Documentación completa fase por fase, con
 decisiones de diseño y su justificación, en [`INSTRUCCIONES.md`](INSTRUCCIONES.md).
 
 ## Estado del proyecto
@@ -55,7 +60,7 @@ decisiones de diseño y su justificación, en [`INSTRUCCIONES.md`](INSTRUCCIONES
 | 7. MLOps | ✅ Completa | [`phase-summaries/07-mlops.md`](phase-summaries/07-mlops.md) — Docker + Artifact Registry, Model Registry, Vertex AI Pipeline (KFP) con registro condicional, batch prediction sobre el test set real, Cloud Scheduler (pausado a propósito) |
 | 8. Tablas agregadas | ✅ Completa | [`phase-summaries/08-tablas-agregadas.md`](phase-summaries/08-tablas-agregadas.md) — 3 tablas para Looker Studio, <2.5GB facturados en total |
 | 9. Dashboard Looker Studio | ✅ Completa | [`phase-summaries/09-dashboard-looker-studio.md`](phase-summaries/09-dashboard-looker-studio.md) — 2 páginas, [dashboard público](https://datastudio.google.com/u/0/reporting/fd99acbf-5e6e-4299-a76a-97591b28d26a); 3 bugs encontrados y corregidos en el camino (escala 10x, discontinuidad temporal, falta de desglose por categoría) |
-| 10. Presentación | ⏳ Pendiente | |
+| 10. Presentación | ✅ Completa | [`phase-summaries/10-presentacion.md`](phase-summaries/10-presentacion.md) — README completo, diagrama de arquitectura, notebook de evaluación revisado |
 
 ## Hallazgos clave (EDA + Feature Engineering)
 
@@ -96,9 +101,7 @@ Pinball Loss promedio por percentil, sobre 5 folds espaciados (`window_size=365`
 
 **LightGBM Cuantil gana en los 5 percentiles, en ambos alcances.** Un detalle relevante para
 la narrativa técnica: BQML supera a ARIMA clásico en el cuerpo de la distribución (P25–P75)
-pero pierde en las colas (P05/P95) — coherente con que `ARIMA_PLUS` deriva sus intervalos
-asumiendo normalidad, mientras que LightGBM Cuantil optimiza cada percentil de forma
-independiente y maneja mejor los extremos.
+pero pierde en las colas (P05/P95).
 
 Dos bugs de diseño reales, encontrados y corregidos durante la validación (documentados en
 detalle en el resumen de Fase 5): un `JOIN` en BigQuery que no podaba por partición y hacía
@@ -282,7 +285,3 @@ propósito** (ver Decisiones de diseño) — no genera costo recurrente.
   LightGBM), así que la predicción sobre el test set real (Fase 7) carga los `.txt` del
   modelo directo desde GCS y predice localmente, en vez de un Batch Prediction Job nativo.
 - Más decisiones y su razonamiento completo en `INSTRUCCIONES.md`.
-
-## Autor
-
-[@desareca](https://github.com/desareca)
